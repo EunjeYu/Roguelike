@@ -1,0 +1,195 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using DG.Tweening;
+using CodeStage.AntiCheat.ObscuredTypes;
+public class RulletScroll : MonoBehaviour
+{
+
+    public List<RulletCell> cells;
+    [SerializeField]
+    RectTransform content;
+    [SerializeField]
+    bool move = false;
+    [SerializeField]
+    Image Fake;
+    [SerializeField]
+    RectTransform leftMovingPen;
+    [SerializeField]
+    RectTransform rightMovingPen;
+    [SerializeField]
+    RectTransform leftFixedPen;
+    [SerializeField]
+    RectTransform rightFixedPen;
+    [SerializeField]
+    Animator leftPenAni;
+    [SerializeField]
+    Animator rightPenAni;
+    int maxMoveCount = 10;
+    public RectTransform target;
+    bool finish = false;
+
+    [SerializeField]
+    int cellBossIndex1;
+
+    [SerializeField]
+    int cellBossIndex2; //fake data
+
+    [SerializeField]
+    int cellBossIndex3; //fake data
+
+    ObscuredInt random1;
+    ObscuredInt random2;
+
+    public ParticleSystem leftPart;
+    public ParticleSystem rightPart;
+    System.Action finishCallBack;
+
+    public void StartWheel(System.Action action)
+    {
+        Fake.enabled = true;
+
+        for (int i = 0; i < cells.Count; i++)
+        {
+            cells[i].ShowMoveState();
+            cells[i].SetTextColor(Util.ConvertHexCode("#8f7375"));
+        }
+
+        leftFixedPen.gameObject.SetActive(false);
+        rightFixedPen.gameObject.SetActive(false);
+        leftMovingPen.gameObject.SetActive(true);
+        rightMovingPen.gameObject.SetActive(true);
+
+        SetText();
+
+        StartCoroutine("StartSlot");
+        finishCallBack = action;
+    }
+
+
+    void SetText()
+    {
+        List<ObscuredInt> enemyList = MN_Data.Instance.userMe.chapterBossDict[Util.GetCurrentGamePage()];
+        ObscuredInt bossNo = 0;
+
+        for (int i = 0; i < enemyList.Count; i++)
+        {
+            if (Util.GetEnemyType(enemyList[i]) == EnemyType.Boss)
+                bossNo = enemyList[i];
+        }
+        ObscuredString bossName = Util.GetLocalText(("RouletteBoss_" + bossNo));
+        cells[cellBossIndex1].SetText(bossName); //뵤른
+
+        ObscuredInt r = Random.Range(3, 16);
+
+        cells[cellBossIndex2].SetText(Util.GetLocalText("Roulette_basic_" + Random.Range(1, r)));
+        cells[cellBossIndex3].SetText(Util.GetLocalText("Roulette_basic_" + Random.Range(r, 24)));
+        cells[cellBossIndex2].SetFont(10);
+        cells[cellBossIndex3].SetFont(10);
+    }
+
+    IEnumerator StartSlot()
+    {
+        int count = 0;
+        this.move = false;
+        this.finish = false;
+
+        while (!finish)
+        {
+            Vector3 pos = content.anchoredPosition;
+            pos.y -= 100;
+            content.anchoredPosition = pos;
+
+            if (content.anchoredPosition.y < -388)
+            {
+                pos = content.anchoredPosition;
+                pos.y = 99;
+                content.anchoredPosition = pos;
+                count++;
+            }
+
+            if (count > maxMoveCount)
+                move = true;
+
+            yield return new WaitForEndOfFrame();
+        }
+    }
+
+
+    private void Update()
+    {
+        if (move)
+        {
+            if (content.anchoredPosition.y >= -1f && content.anchoredPosition.y <= 1f)
+            {
+                finish = true;
+                Invoke("Set", 0.8f);
+                Invoke("Finish", 1.5f);
+                content.anchoredPosition = Vector2.zero;
+                content.DOPunchAnchorPos(target.anchoredPosition, 1.8f, 8, 1);
+
+                for (int i = 0; i < cells.Count; i++)
+                {
+                    cells[i].HideMoveState();
+                }
+                Fake.enabled = false;
+                move = false;
+
+
+                leftFixedPen.gameObject.SetActive(true);
+                rightFixedPen.gameObject.SetActive(true);
+                leftMovingPen.gameObject.SetActive(false);
+                rightMovingPen.gameObject.SetActive(false);
+                leftPart.Stop();
+                rightPart.Stop();
+                leftPenAni.SetTrigger("move");
+                rightPenAni.SetTrigger("move");
+
+            }
+        }
+    }
+
+    void Set()
+    {
+        cells[cellBossIndex1].SetTextColor(Color.black);
+    }
+
+    void Finish()
+    {
+        finishCallBack?.Invoke();
+    }
+
+    public void Stop()
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            cells[i].SetTextColor(Util.ConvertHexCode("#8f7375"));
+        }
+
+        SetText();
+        for (int i = 0; i < cells.Count; i++)
+        {
+            cells[i].HideMoveState();
+        }
+        cells[cellBossIndex1].SetTextColor(Color.black);
+        leftPenAni.enabled = false;
+        rightPenAni.enabled = false;
+        leftFixedPen.gameObject.SetActive(true);
+        rightFixedPen.gameObject.SetActive(true);
+
+        leftFixedPen.transform.eulerAngles = Vector3.zero;
+        rightFixedPen.transform.eulerAngles = Vector3.zero;
+
+        leftMovingPen.gameObject.SetActive(false);
+        rightMovingPen.gameObject.SetActive(false);
+        leftPart.Stop();
+        rightPart.Stop();
+
+        Fake.enabled = false;
+    }
+
+}
+
+
+
