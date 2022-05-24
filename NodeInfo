@@ -1,0 +1,279 @@
+using System;
+using DG.Tweening;
+using UnityEngine;
+using UnityEngine.UI;
+using CodeStage.AntiCheat.ObscuredTypes;
+using System.Linq;
+using TMPro;
+
+namespace Map
+{
+    public enum NodeStates
+    {
+        Locked, //잠겨 있는 상태
+        Visited, //지나 온 길
+        Attainable, //선택 할 수 있는 길
+        Indicated, //선택 된 길
+        CurrentPos,
+    }
+}
+
+namespace Map
+{
+    public class MapNode : MonoBehaviour
+    {
+        public Transform Clone;
+        #region UI_Var
+        [SerializeField]
+        private Image groundImg;
+
+        [SerializeField]
+        private Image iconImg;
+
+        [SerializeField]
+        private Image unitImg;
+
+        [SerializeField]
+        private GameObject apFrameObj;
+
+        [SerializeField]
+        private TextMeshProUGUI apText;
+
+        [SerializeField]
+        Image arrowImage;
+        #endregion
+
+        #region Var
+        public Node Node { get; private set; }
+        public NodeBlueprint Blueprint { get; private set; }
+        public NodeStates CurrentState { get; private set; }
+
+        public ObscuredInt EnterAp;
+        #endregion
+
+        private float mouseDownTime;
+
+        private const float MaxClickDuration = 0.5f;
+
+        public void SetUp(Node node, NodeBlueprint blueprint)
+        {
+            Node = node;
+
+            // if (!MN_Data.Instance.tdStageDict[Util.GetChapter()].ContainsKey(node.point.y + 1))
+            // {
+            //     EnterAp = 6;
+            // }
+            // else
+            // {
+
+            //     // int minActionPoint = Util.GetStageData(Util.GetChapter(), node.point.y + 1).minActionPoint;
+            //     // int maxActionPoint = Util.GetStageData(Util.GetChapter(), node.point.y + 1).maxActionPoint + 1;
+            //     // EnterAp = UnityEngine.Random.Range(minActionPoint, maxActionPoint);
+
+            // }
+
+            apText.text = EnterAp.ToString();
+
+            Blueprint = blueprint;
+
+            iconImg.sprite = blueprint.sprite;
+
+            if (node.point.y == 0 || node.nodeType == NodeType.Boss)
+                transform.localScale *= 1.2f;
+
+            SetState(NodeStates.Locked);
+            //HideMiniInfo();
+        }
+
+        public void ShowUnitImg(bool bShow)
+        {
+            unitImg.sprite = Util.GetUnitImgSprite(Util.GetCurrentHeroNo(), UnitType.Hero);
+            unitImg.gameObject.SetActive(bShow);
+        }
+
+        public void SetState(NodeStates state)
+        {
+            ShowUnitImg(false);
+            iconImg.gameObject.SetActive(true);
+
+            switch (state)
+            {
+                case NodeStates.Locked:
+                    if (Node.nodeType == NodeType.Battle)
+                        groundImg.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_4");
+                    else
+                        groundImg.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_1");
+
+                    apFrameObj.gameObject.SetActive(false);
+                    break;
+                case NodeStates.Visited:
+                    groundImg.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_2");
+                    apFrameObj.gameObject.SetActive(false);
+                    break;
+                case NodeStates.Attainable:
+                    groundImg.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_3");
+                    apFrameObj.gameObject.SetActive(true);
+                    break;
+                case NodeStates.Indicated:
+                    apFrameObj.gameObject.SetActive(false);
+                    break;
+
+                case NodeStates.CurrentPos:
+                    ShowUnitImg(true);
+                    iconImg.gameObject.SetActive(false);
+                    apFrameObj.gameObject.SetActive(true);
+                    apText.text = MN_InGameData.Instance.Ap.ToString();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(state), state, null);
+            }
+
+
+            CurrentState = state;
+        }
+        public void ShowMiniInfo()
+        {
+            MapView.Instance.HideAllMiniNodeInfo();
+            //nodeNameBox.gameObject.SetActive(true);
+
+            switch (Node.nodeType)
+            {
+                case NodeType.RestSite:
+                    //groundSr.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_1");
+                    //nodeInfoText.text = Util.GetLocalText("ui_map_nodetype_restsite");
+                    break;
+                case NodeType.Market:
+                    //groundSr.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_1");
+                    //nodeInfoText.text = Util.GetLocalText("ui_map_nodetype_store");
+                    break;
+                case NodeType.Boss:
+                    //groundSr.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_4");
+                    //nodeInfoText.text = Util.GetLocalText("ui_map_nodetype_boss");
+                    break;
+                default:
+                    //groundSr.sprite = MN_Res.Instance.GetImageAtlas("icon_character_ground_4");
+                    //nodeInfoText.text = Util.GetLocalText("ui_map_nodetype_battle");
+                    break;
+            }
+
+            if (MapManager.Instance.CurrentMap.path.Count == 0)
+            {
+                if (Node.point.y == 0) //플레이어 이동경로가 없으므로, y가 0인 노드는 모두 accessible
+                {
+
+                }
+                else
+                {
+
+                }
+            }
+            else
+            {
+                var currentPoint = MapManager.Instance.CurrentMap.path[MapManager.Instance.CurrentMap.path.Count - 1];
+                var currentNode = MapManager.Instance.CurrentMap.GetNode(currentPoint);
+
+                if (currentNode != null && currentNode.outgoing.Any(point => point.Equals(Node.point))) //현재 노드에서 클릭한 노드로 연결이 되어 있다면,
+                {
+
+                }
+                else if (CurrentState == NodeStates.Visited)
+                {
+
+                }
+                else
+                {
+                    //sr.color = MapView.Instance.visitedColor;
+                    //sr.transform.DOKill();
+                    // sr.transform.DOScale(initialScale * HoverScaleFactor, 0.3f);
+                }
+            }
+
+        }
+        public void HideMiniInfo()
+        {
+            if (MapManager.Instance.CurrentMap.path.Count == 0)
+            {
+                if (Node.point.y == 0) //플레이어 이동경로가 없으므로, y가 0인 노드는 모두 accessible
+                {
+
+                }
+                else
+                {
+
+                }
+            }
+            else
+            {
+                var currentPoint = MapManager.Instance.CurrentMap.path[MapManager.Instance.CurrentMap.path.Count - 1];
+                var currentNode = MapManager.Instance.CurrentMap.GetNode(currentPoint);
+
+                if (currentNode != null && currentNode.outgoing.Any(point => point.Equals(Node.point))) //현재 노드에서 클릭한 노드로 연결이 되어 있다면,
+                { }
+                else if (CurrentState == NodeStates.Visited)
+                {
+
+                }
+                else
+                {
+                    //sr.DOKill();
+                    //sr.color = MapView.Instance.lockedColor;
+                    // if (sr.transform.localScale.x != initialScale)
+                    //     sr.transform.DOScale(initialScale, 0.3f);
+                }
+            }
+        }
+
+        private void OnMouseDown()
+        {
+            if (MapManager.Instance.EventLayerOpen())
+                return;
+            mouseDownTime = Time.time;
+
+            if (IsCheckRayCastUI())
+            {
+                return;
+            }
+
+            MapView.Instance.SetNodeInfo(this);
+
+        }
+
+        private void OnMouseUp()
+        {
+            if (MapManager.Instance.EventLayerOpen())
+                return;
+            if (Time.time - mouseDownTime < MaxClickDuration) //짧은 텀의 클릭만을 노드클릭으로
+            {
+                if (IsCheckRayCastUI())
+                {
+
+                }
+                else
+                {
+                    MapManager.Instance.mapPlayerTracker.SelectNode(this);
+                }
+            }
+            else
+            {
+             //   MapManager.Instance.view.NodeInfoControlable = true;
+            }
+        }
+
+        bool IsCheckRayCastUI()
+        {
+            Vector3 mousePosition = Input.mousePosition;
+            mousePosition.z = Mathf.Infinity;
+
+            RaycastHit2D hit = Physics2D.Raycast(mousePosition, mousePosition - Camera.main.ScreenToWorldPoint(mousePosition), Mathf.Infinity);
+
+            if (hit)
+                if (hit.transform.gameObject.layer == 5 || hit.transform.gameObject.layer == 10)
+                {
+                    return true;
+                }
+
+            return false;
+
+        }
+    }
+}
