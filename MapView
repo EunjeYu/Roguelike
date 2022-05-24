@@ -1,0 +1,442 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Map
+{
+    public class MapView : MonoBehaviour
+    {
+        public List<MapConfig> allMapConfigs;
+        public GameObject nodePrefab;
+
+        #region Background Settings
+        [Header("Background Settings")]
+
+        public Sprite background;
+        public Color32 backgroundColor = Color.white;
+        public float xSize;
+        public float yOffset;
+        #endregion
+
+        [Space]
+
+        #region Line Setting
+        [Header("Line Settings")]
+        public GameObject linePrefab;
+
+        [Range(3, 10)]
+        public int linePointsCount = 10;
+        #endregion
+
+        [Space]
+
+        [Tooltip("Distance from the node till the line starting point")]
+        public float offsetFromNodes = 0.5f;
+
+        [Space]
+
+        #region ColorVar
+        //=================================================================
+        [Header("Colors")]
+        public Color32 lineVisitedColor = Color.white;
+
+        public Color32 lineLockedColor = Color.white;
+        //=================================================================
+        #endregion
+
+        [SerializeField]
+        private ScrollRect mapScroll;
+
+        public GameObject mapParent;
+
+        // ALL nodes:
+        public readonly List<MapNode> MapNodes = new List<MapNode>();
+        private readonly List<LineConnection> lineConnections = new List<LineConnection>();
+
+
+        public static MapView Instance;
+
+        public NodeInfo NodeInfo;
+        public PartyInfo PartyInfo;
+
+
+        [HideInInspector]
+        public bool NodeInfoControlable = true;
+        public bool minipopCtrl = true;
+
+        GameObject verticalPrefab;
+        GameObject testObject;
+
+        private void Awake()
+        {
+            Instance = this;
+            verticalPrefab = Resources.Load<GameObject>("01_UI/Prefabs/Map/verticalPrefab");
+            testObject = Resources.Load<GameObject>("01_UI/Prefabs/Map/test");
+        }
+
+        private void ClearMap()
+        {
+            if (mapParent != null)
+                Destroy(mapParent);
+
+            MapNodes.Clear();
+            lineConnections.Clear();
+
+        }
+
+        public void ShowMap(Map m)
+        {
+            if (m == null)
+            {
+                Debug.LogWarning("Map was null in MapView.ShowMap()");
+                return;
+            }
+
+            //ClearMap();
+
+            SetMapParentWidth(m);
+
+            CreateNodes(m.nodes);
+
+            Invoke("createTestPots", 0.1f);
+
+            // DrawLines();
+
+            // ResetNodesRotation();
+
+            // SetAttainableNodes();
+
+            // SetLineColors();
+        }
+
+        void createTestPots()
+        {
+            for (int i = 0; i < verticalParentList.Count; i++)
+            {
+                verticalParentList[i].GetComponent<VerticalLayoutGroup>().enabled = false;
+            }
+            for (int i = 0; i < verticalParentList.Count; i++)
+            {
+                List<GameObject> childList = new List<GameObject>();
+                for (int j = 0; j < verticalParentList[i].transform.childCount; j++)
+                {
+                    {
+                        GameObject obj = Instantiate(testObject);
+                        childList.Add(obj);
+                    }
+                }
+
+                for (int k = 0; k < childList.Count; k++)
+                {
+                    childList[k].transform.SetParent(verticalParentList[i].transform);
+                    childList[k].transform.localPosition = verticalParentList[i].transform.GetChild(k).localPosition;
+                    childList[k].transform.localScale = Vector3.one;
+
+                    childList[k].transform.SetParent(mapParent.transform);
+
+                    verticalParentList[i].transform.GetChild(k).GetComponent<MapNode>().Clone = childList[k].transform;
+                }
+            }
+
+            DrawLines();
+
+            ResetNodesRotation();
+
+            SetAttainableNodes();
+
+            SetLineColors();
+        }
+
+        void SetMapParentWidth(Map m)
+        {
+            mapScroll.content.sizeDelta = new Vector2(m.width + 300f, mapScroll.content.sizeDelta.y);
+        }
+
+        private void CreateNodes(IEnumerable<Node> nodes)
+        {
+            verticalParentList = new List<GameObject>();
+
+            foreach (var node in nodes)
+            {
+                var mapNode = CreateMapNode(node);
+                MapNodes.Add(mapNode);
+            }
+        }
+
+        int curY = -1;
+
+        GameObject verticalLayout;
+
+        List<GameObject> verticalParentList;
+        private MapNode CreateMapNode(Node node)
+        {
+            var mapNodeObject = Instantiate(nodePrefab, mapParent.transform);
+            mapNodeObject.gameObject.name = node.NodeName;
+            MapNode mapNode = mapNodeObject.GetComponent<MapNode>();
+            var blueprint = GetBlueprint(node.blueprintName);
+
+            mapNode.SetUp(node, blueprint);
+
+            if (curY != mapNode.Node.point.y)
+            {
+                curY = mapNode.Node.point.y;
+                verticalLayout = Instantiate(verticalPrefab, mapParent.transform);
+                verticalParentList.Add(verticalLayout);
+                verticalLayout.transform.localPosition = new Vector2(node.position.x, 0); //temp
+            }
+
+            mapNode.transform.localPosition = node.position;
+
+            mapNode.transform.SetParent(verticalLayout.transform);
+
+            return mapNode;
+        }
+
+        private void Update()
+        {
+            if (Input.GetKeyUp(KeyCode.Alpha9)) //test 1
+            {
+                createTestPots();
+            }
+
+            if (Input.GetMouseButtonUp(0) && NodeInfoControlable)
+            {
+                if (NodeInfo.MapNodeForNodeInfo != null && !MapManager.Instance.CurrentMap.path.Contains(NodeInfo.MapNodeForNodeInfo.Node.point)) //패쓰에 있거나
+                {
+                    if (MapManager.Instance.CurrentMap.path.Count == 0 && NodeInfo.MapNodeForNodeInfo.Node.point.y == 0)
+                    {
+                        //패쓰가 없는 첫 노드일경우
+                    }
+                    else
+                    {
+                        if (NodeInfo.MapNodeForNodeInfo != null)
+                            if (NodeInfo.MapNodeForNodeInfo.CurrentState != NodeStates.Attainable)
+                                NodeInfo.MapNodeForNodeInfo.SetState(NodeStates.Locked);
+                    }
+                }
+                //if (NodeInfo.MapNodeForNodeInfo != null)
+                //    NodeInfo.MapNodeForNodeInfo.visitedCircle.gameObject.SetActive(false); //temp
+
+                if (!IsCheckRayCastUI())
+                {
+                    //NodeInfo.TurnOffNodeInfo();
+                    if (minipopCtrl)
+                        HideAllMiniNodeInfo();
+                }
+            }
+
+            if (Input.GetMouseButtonDown(0))
+                minipopCtrl = true;
+
+        }
+        bool IsCheckRayCastUI()
+        {
+            Vector3 mousePosition = Input.mousePosition;
+            mousePosition.z = Mathf.Infinity;
+
+            RaycastHit2D hit = Physics2D.Raycast(mousePosition, mousePosition - Camera.main.ScreenToWorldPoint(mousePosition), Mathf.Infinity);
+
+            if (hit)
+                if (hit.transform.gameObject.layer == 10)
+                {
+                    return true;
+                }
+
+            return false;
+
+        }
+        public void SetAttainableNodes()
+        {
+            // first set all the nodes as unattainable/locked:
+            foreach (var node in MapNodes)
+            {
+                if (node.CurrentState != NodeStates.Indicated)
+                    node.SetState(NodeStates.Locked);
+            }
+
+            if (MapManager.Instance.CurrentMap.path.Count == 0)
+            {
+                MapNodes.Find(n => n.Node.point.y == 0).SetState(NodeStates.CurrentPos);
+
+
+                foreach (var node in MapNodes.Where(n => n.Node.point.y == 1))
+                    node.SetState(NodeStates.Attainable);
+            }
+            else
+            {
+                //경로에 포함된 모든 노드 SetState
+                foreach (var point in MapManager.Instance.CurrentMap.path)
+                {
+                    var mapNode = GetNode(point);
+                    if (mapNode != null)
+                    {
+                        mapNode.SetState(NodeStates.Visited);
+                    }
+                }
+
+                int lastCount = MapManager.Instance.CurrentMap.path.Count - 1;
+
+                GetNode(MapManager.Instance.CurrentMap.path[lastCount]).SetState(NodeStates.CurrentPos);
+
+                //현재노드에서 접근가능한 노드 SetState
+                var currentPoint = MapManager.Instance.CurrentMap.path[MapManager.Instance.CurrentMap.path.Count - 1];
+                var currentNode = MapManager.Instance.CurrentMap.GetNode(currentPoint);
+
+                foreach (var point in currentNode.outgoing)
+                {
+                    var mapNode = GetNode(point);
+                    if (mapNode != null)
+                        mapNode.SetState(NodeStates.Attainable);
+                }
+            }
+        }
+
+        public void SetLineColors()
+        {
+
+            foreach (var connection in lineConnections)
+                connection.SetColor(lineLockedColor);
+
+            if (MapManager.Instance.CurrentMap.path.Count == 0)
+                return;
+
+
+            var currentPoint = MapManager.Instance.CurrentMap.path[MapManager.Instance.CurrentMap.path.Count - 1];
+            var currentNode = MapManager.Instance.CurrentMap.GetNode(currentPoint);
+
+            foreach (var point in currentNode.outgoing)
+            {
+                var lineConnection = lineConnections.FirstOrDefault(conn => conn.from.Node == currentNode &&
+                                                                            conn.to.Node.point.Equals(point));
+                lineConnection?.SetColor(lineVisitedColor);
+            }
+
+            if (MapManager.Instance.CurrentMap.path.Count <= 1) return;
+
+            for (var i = 0; i < MapManager.Instance.CurrentMap.path.Count - 1; i++)
+            {
+                var current = MapManager.Instance.CurrentMap.path[i];
+                var next = MapManager.Instance.CurrentMap.path[i + 1];
+                var lineConnection = lineConnections.FirstOrDefault(conn => conn.@from.Node.point.Equals(current) &&
+                                                                            conn.to.Node.point.Equals(next));
+                lineConnection?.SetColor(lineVisitedColor);
+            }
+        }
+
+        private void DrawLines()
+        {
+            foreach (var node in MapNodes)
+            {
+                foreach (var connection in node.Node.outgoing)
+                    AddLineConnection(node, GetNode(connection));
+            }
+        }
+
+        private void ResetNodesRotation()
+        {
+            foreach (var node in MapNodes)
+                node.transform.rotation = Quaternion.identity;
+        }
+
+        public void AddLineConnection(MapNode fromNode, MapNode toNode)
+        {
+            Transform fromClone = fromNode.Clone;
+            Transform toClone = toNode.Clone;
+
+            var lineObject = Instantiate(linePrefab, mapParent.transform);
+            var lineRenderer = lineObject.GetComponent<LineRenderer>();
+            var fromPoint = fromClone.localPosition +
+                            (toClone.transform.localPosition - fromClone.transform.localPosition).normalized * offsetFromNodes;
+
+            var toPoint = toClone.transform.localPosition +
+                          (fromClone.transform.localPosition - toClone.transform.localPosition).normalized * offsetFromNodes;
+
+            // drawing lines in local space:
+            lineObject.transform.localPosition = fromPoint;
+
+            lineRenderer.useWorldSpace = false;
+
+            // line renderer with 2 points only does not handle transparency properly:
+            lineRenderer.positionCount = linePointsCount;
+            for (var i = 0; i < linePointsCount; i++)
+            {
+                lineRenderer.SetPosition(i,
+                    Vector3.Lerp(Vector3.zero, toPoint - fromPoint, (float)i / (linePointsCount - 1)));
+            }
+
+            var dottedLine = lineObject.GetComponent<DottedLineRenderer>();
+            if (dottedLine != null) dottedLine.ScaleMaterial();
+
+            lineConnections.Add(new LineConnection(lineRenderer, fromNode, toNode));
+
+            GameObject lineObj = Instantiate(linePrefab, mapParent.transform);
+
+            lineObj.transform.position = fromClone.position;
+
+            Vector2 LookAtPoint = new Vector2(fromClone.position.z, toClone.position.y);
+            lineObj.transform.LookAt(new Vector3(0, LookAtPoint.y, LookAtPoint.x));
+        }
+
+        public void SetNodeInfo(MapNode node) //접근 가능한 노드일 경우만 info 켜주도록.
+        {
+            if (node.CurrentState == NodeStates.CurrentPos)
+            {
+                PartyInfo.ShowInfo(false,0);
+            }
+
+            else if (MapManager.Instance.CurrentMap.path.Count == 0)
+            {
+                if (node.Node.point.y == 1) //플레이어 이동경로가 없으므로, y가 0인 노드는 모두 accessible
+                {
+                    NodeInfoControlable = false;
+                }
+            }
+
+            else
+            {
+                var currentPoint = MapManager.Instance.CurrentMap.path[MapManager.Instance.CurrentMap.path.Count - 1];
+                var currentNode = MapManager.Instance.CurrentMap.GetNode(currentPoint);
+                if (currentNode != null && currentNode.outgoing.Any(point => point.Equals(node.Node.point))) //현재 노드에서 클릭한 노드로 연결이 되어 있다면,
+                {
+                    NodeInfoControlable = false;
+                }
+                else
+                {
+                    NodeInfoControlable = true;
+                }
+            }
+        }
+
+        public void HideAllMiniNodeInfo()
+        {
+            for (int i = 0; i < MapNodes.Count; i++)
+            {
+                MapNodes[i].HideMiniInfo();
+            }
+        }
+
+        private MapNode GetNode(MapNodePoint p)
+        {
+            return MapNodes.FirstOrDefault(n => n.Node.point.Equals(p));
+        }
+
+        private MapConfig GetConfig(string configName)
+        {
+            return allMapConfigs.FirstOrDefault(c => c.name == configName);
+        }
+
+        public NodeBlueprint GetBlueprint(NodeType type)
+        {
+            var config = GetConfig(MapManager.Instance.CurrentMap.configName);
+            return config.nodeBlueprints.FirstOrDefault(n => n.nodeType == type);
+        }
+
+        public NodeBlueprint GetBlueprint(string blueprintName)
+        {
+            var config = GetConfig(MapManager.Instance.CurrentMap.configName);
+            return config.nodeBlueprints.FirstOrDefault(n => n.name == blueprintName);
+        }
+    }
+}
