@@ -1,0 +1,785 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using CodeStage.AntiCheat.ObscuredTypes;
+using System.Linq;
+using Map;
+
+public class MapData : MonoBehaviour
+{
+    public List<ObscuredInt> countInfoList { get; private set; }
+    Dictionary<ObscuredInt, List<List<MapPoint>>> inComingDict = new Dictionary<ObscuredInt, List<List<MapPoint>>>();
+    Dictionary<ObscuredInt, List<List<MapPoint>>> outGoingDict = new Dictionary<ObscuredInt, List<List<MapPoint>>>();
+
+    List<ObscuredInt[]> sectionList;
+    ObscuredInt[] section1 = { 1, 4 };
+    ObscuredInt[] section2 = { 5, 8 };
+    ObscuredInt[] section3 = { 9, 13 };
+    ObscuredInt[] section4 = { 14, 18 };
+    ObscuredInt[] section5 = { 19, 23 };
+    int specialGroupCount = 4;
+    int interval = 150;
+    Dictionary<int, int> indexDict = new Dictionary<int, int>();
+
+    private void Awake()
+    {
+        if (indexDict.Count == 0)
+            SetIndexDict();
+    }
+
+    void SetIndexDict()
+    {
+        indexDict.Add(0, 3);
+        indexDict.Add(1, 2);
+        indexDict.Add(2, 1);
+        indexDict.Add(3, 0);
+    }
+
+
+    public void SetMapCount(bool init)
+    {
+        countInfoList = new List<ObscuredInt>();
+
+        ObscuredInt stageCount = Util.GetPageStageCount(Util.GetChapter(), Util.GetCurrentGamePage());
+
+        if (init)
+        {
+            for (int i = 0; i < stageCount; i++)
+            {
+                ObscuredInt min = 1;
+                ObscuredInt max = 1;
+
+                ObscuredInt count = 0;
+
+                List<ObscuredInt> list = this.GetMapMinMax(i).ToList();
+
+                if (list.Count > 0)
+                {
+                    min = list[0];
+                    max = list[1];
+                }
+                count = Random.Range(min, max + 1);
+
+                if (i == stageCount - 1)
+                    count = 1;
+                if (i == 0 /*|| i == 1*/)
+                    count = 1;
+
+                this.countInfoList.Add(count);
+            }
+
+            Map.MapManager.Instance.countInfoList = this.countInfoList.ToList();
+        }
+        else
+        {
+            this.countInfoList = Map.MapManager.Instance.CurMap.countInfoList;
+        }
+
+        foreach (var item in MapContainer.Instance.NodeDict) //interval 계산 --> 해상도
+        {
+            ObscuredInt count = countInfoList[item.Key];
+
+            float initPosY;
+
+            if (count > 1)
+            {
+                if (count % 2 == 0)
+                {
+                    initPosY = 0 - (count / 2) * interval + interval / 2;
+                }
+                else
+                    initPosY = 0 - interval * (count / 2);
+            }
+            else
+            {
+                initPosY = 0;
+            }
+
+            for (int j = 0; j < 4; j++)
+            {
+                MapContainer.Instance.NodeDict[item.Key][j].gameObject.SetActive(false);
+
+                if (j < count)
+                {
+                    MapContainer.Instance.NodeDict[item.Key][j].gameObject.SetActive(true);
+                    MapContainer.Instance.NodeDict[item.Key][j].ShowFlagUI(false);
+                    MapContainer.Instance.NodeDict[item.Key][j].transform.localPosition = new Vector2(0, initPosY + j * interval);
+                }
+            }
+
+            if (indexDict.Count == 0)
+                SetIndexDict();
+
+            for (int k = 0; k < 4; k++)
+            {
+                MapContainer.Instance.NodeDict[item.Key][k].transform.SetSiblingIndex(indexDict[k]);
+            }
+        }
+    }
+
+
+    List<ObscuredInt> GetMapMinMax(ObscuredInt lv)
+    {
+        List<ObscuredInt> list = new List<ObscuredInt>();
+
+        Dictionary<ObscuredInt, TDMap> mapDict = new Dictionary<ObscuredInt, TDMap>();
+
+        mapDict = MN_Data.Instance.tdMapDict[Util.GetChapter()][MN_InGameData.Instance.currentPage];
+
+        foreach (var i in mapDict)
+        {
+            if (i.Value.stageLv == lv)
+            {
+                list.Add(i.Value.min);
+                list.Add(i.Value.max);
+            }
+        }
+
+        return list;
+    }
+
+    public void SetAp(bool init)
+    {
+        ObscuredInt stageCount = Util.GetPageStageCount(Util.GetChapter(), Util.GetCurrentGamePage());
+        Debug.Log("#stageCount " + stageCount);
+
+        List<List<ObscuredInt>> apList = new List<List<ObscuredInt>>();
+
+        for (int i = 0; i < stageCount; i++) // 6
+        {
+            List<ObscuredInt> list = new List<ObscuredInt>();
+
+            for (int j = 0; j < countInfoList[i]; j++)
+            {
+                if (init)
+                {
+                    ObscuredInt min = 1;
+                    ObscuredInt max = 1;
+
+                    if (i > 0)
+                    {
+                        ObscuredInt stageNo = MN_Data.Instance.tdMapDict[Util.GetChapter()][Util.GetCurrentGamePage()][i].stageNo;
+                        min = Util.GetStageData(stageNo, StageType.Battle).minActionPoint;
+                        max = Util.GetStageData(stageNo, StageType.Battle).maxActionPoint;
+                    }
+                    ObscuredInt apVal = Random.Range(min, max + 1);
+                    MapContainer.Instance.NodeDict[i][j].SetAp(apVal);
+                    list.Add(apVal);
+                }
+                else
+                {
+                    MapContainer.Instance.NodeDict[i][j].SetAp(MapManager.Instance.CurMap.apList[i][j]);
+                }
+            }
+            apList.Add(list);
+        }
+
+        if (init)
+            MapManager.Instance.apList = apList.ToList();
+    }
+
+    public void SetPath(bool init)
+    {
+        if (init)
+        {
+            outGoingDict = new Dictionary<ObscuredInt, List<List<MapPoint>>>();
+            inComingDict = new Dictionary<ObscuredInt, List<List<MapPoint>>>();
+
+            foreach (var item in MapContainer.Instance.NodeDict)
+            {
+                //outGoing Set
+                List<List<pfIsland>> pathList = new List<List<pfIsland>>();
+                List<List<MapPoint>> mapPoints = new List<List<MapPoint>>();
+
+                if (item.Key < MapContainer.Instance.NodeDict.Count - 1) // 맨 마지막 x
+                    pathList = Map.MapManager.Instance.GetNextLineMembers(item.Key);
+
+                List<MapPoint> outList = new List<MapPoint>();
+
+                for (int i = 0; i < pathList.Count; i++) // 노드 한개, 연결 리스트
+                {
+                    outList = new List<MapPoint>();
+                    for (int j = 0; j < pathList[i].Count; j++)
+                    {
+                        MapPoint mapPoint = new MapPoint(pathList[i][j].level, pathList[i][j].nodeIndex);
+                        outList.Add(mapPoint);
+                    }
+                    mapPoints.Add(outList);
+                }
+                outGoingDict.Add(item.Key, mapPoints);
+
+                //inComing Set
+                List<List<MapPoint>> mapPoints2 = new List<List<MapPoint>>();
+
+                ObscuredInt preLv = item.Key - 1;
+                if (outGoingDict.ContainsKey(preLv))
+                    for (int k = 0; k < countInfoList[item.Key]; k++) //이전 아웃고잉에서 현 인덱스 포함,
+                    {
+                        for (int i = 0; i < outGoingDict[preLv].Count; i++)
+                        {
+                            List<MapPoint> inList = new List<MapPoint>();
+                            for (int j = 0; j < outGoingDict[preLv][i].Count; j++) //원 라인
+                            {
+                                if (outGoingDict[item.Key - 1][i][j].index == k)//해당 노드 바깥 연결 노선 중, 현 라인 인덱스와 일치하는 것이 있는지 == connected detected
+                                {
+                                    MapPoint point = new MapPoint(item.Key - 1, i);
+                                    inList.Add(point);
+                                }
+                            }
+                            mapPoints2.Add(outList);
+                        }
+                    }
+
+                inComingDict[item.Key] = mapPoints2;
+            }
+
+            MapManager.Instance.outGoingDict = outGoingDict;
+            MapManager.Instance.inComingDict = inComingDict;
+        }
+        else
+        {
+            inComingDict = MapManager.Instance.CurMap.inComingDict;
+            outGoingDict = MapManager.Instance.CurMap.outGoingDict;
+        }
+    }
+
+    ObscuredInt NodeTypePercent(ObscuredInt lv, NodeType nodeType)
+    {
+        ObscuredInt percentage = 0;
+
+        /* node 별 타입 퍼센트를 가져온다. */
+        Dictionary<ObscuredInt, TDMap> dict = MN_Data.Instance.tdMapDict[Util.GetChapter()][MN_InGameData.Instance.currentPage];
+
+        foreach (var i in dict)
+        {
+            if (i.Value.stageLv == lv)
+            {
+                switch (nodeType)
+                {
+                    case NodeType.Battle:
+                        percentage = i.Value.battlePer;
+                        break;
+                    case NodeType.Market:
+                        percentage = i.Value.marketPer;
+                        break;
+                    case NodeType.RestSite:
+                        percentage = i.Value.restPer;
+                        break;
+                    case NodeType.Event:
+                        percentage = i.Value.eventPer;
+                        break;
+                    case NodeType.GreenKnight:
+                        percentage = i.Value.knightPer;
+                        break;
+                }
+            }
+        }
+        return percentage;
+    }
+
+    public void SetNodeType(bool init)
+    {
+        List<List<NodeData>> nodeDataList = new List<List<NodeData>>();
+
+        if (init)
+        {
+            sectionList = new List<ObscuredInt[]>();
+
+            sectionList.Add(section1);
+            sectionList.Add(section2);
+            sectionList.Add(section3);
+            sectionList.Add(section4);
+            sectionList.Add(section5);
+
+            List<List<NodeType>> typeInfoList = new List<List<Map.NodeType>>();
+
+            Dictionary<ObscuredInt, NodeType> perDict = new Dictionary<ObscuredInt, NodeType>();
+
+            List<ObscuredInt> perList = new List<ObscuredInt>();
+
+            Dictionary<ObscuredInt, Dictionary<NodeType, ObscuredInt>> logDict = new Dictionary<ObscuredInt, Dictionary<NodeType, ObscuredInt>>(); //key - sectionIndex
+
+            perDict.Add(0, NodeType.Battle);
+            perDict.Add(1, NodeType.Market);
+            perDict.Add(2, NodeType.RestSite);
+            perDict.Add(3, NodeType.Event);
+            perDict.Add(4, NodeType.GreenKnight);
+
+            ObscuredInt battlePer = 0;
+            ObscuredInt marketPer = 0;
+            ObscuredInt restPer = 0;
+            ObscuredInt eventPer = 0;
+            ObscuredInt knightPer = 0;
+
+            foreach (var item in MapContainer.Instance.NodeDict)
+            {
+                List<NodeType> nodeTypeList = new List<NodeType>();
+
+                perList = new List<ObscuredInt>();
+
+                battlePer = NodeTypePercent(item.Key, NodeType.Battle);
+                marketPer = NodeTypePercent(item.Key, NodeType.Market);
+                restPer = NodeTypePercent(item.Key, NodeType.RestSite);
+                eventPer = NodeTypePercent(item.Key, NodeType.Event);
+                knightPer = NodeTypePercent(item.Key, NodeType.GreenKnight);
+
+                perList.Add(battlePer);
+                perList.Add(marketPer);
+                perList.Add(restPer);
+                perList.Add(eventPer);
+                perList.Add(knightPer);
+
+                NodeType absoluteType = NodeType.Null;
+
+                for (int i = 0; i < countInfoList[item.Key]; i++)
+                {
+                    NodeType type = NodeType.Battle;
+                    if (Util.GetChapter() != 102)
+                    {
+                        ObscuredInt index = Util.RandomPercent(perList);
+
+                        type = perDict[index];
+
+                        if (type == NodeType.GreenKnight) // 녹색의 기사 1 picked, then 0 percent.
+                        {
+                            perList[4] = 0;
+                        }
+
+                        if (type == NodeType.Event || type == NodeType.Market || type == NodeType.RestSite) // 구간 내 중복 확률 없을 이벤트
+                        {
+                            for (int j = 0; j < sectionList.Count; j++)
+                            {
+                                if (item.Key >= sectionList[j][0] && item.Key <= sectionList[j][1]) // 내가 어떤 구간안에 있고,
+                                {
+                                    ObscuredInt sectionIndex = j;
+
+                                    if (!logDict.ContainsKey(sectionIndex))
+                                        logDict.Add(sectionIndex, new Dictionary<NodeType, ObscuredInt>());
+
+                                    if (!logDict[sectionIndex].ContainsKey(type))
+                                        logDict[sectionIndex].Add(type, 0);
+
+                                    logDict[sectionIndex][type]++;
+
+                                    ObscuredInt limitCount = 1;
+
+                                    switch (type)
+                                    {
+                                        case NodeType.Market:
+                                        case NodeType.RestSite:
+                                            break;
+                                        case NodeType.Event:
+                                            limitCount = 2;
+                                            break;
+                                    }
+
+                                    if (logDict[sectionIndex][type] > limitCount)
+                                    {
+                                        type = NodeType.Battle;
+                                        logDict[sectionIndex][type] = limitCount; // 같은 구간안에 특정노드는 1개만 있도록
+                                    }
+                                }
+                            }
+
+                            if (type == NodeType.Event || type == NodeType.Market || type == NodeType.RestSite) //특수 이벤트
+                            {
+                                ObscuredInt preLevel = item.Key - 1;
+                                if (CheckAttainableSameNode(item.Value[i], type, preLevel, nodeDataList)) //연결된 경로에 현재와 같은 타입이 있는지
+                                {
+                                    type = NodeType.Battle;
+                                }
+                                else if (type == NodeType.Market && CheckAttainableSameNode(item.Value[i], NodeType.RestSite, preLevel, nodeDataList)) //연결된 경로에 현재 마켓 - 여관이 있는지
+                                {
+                                    type = NodeType.Battle;
+                                }
+                                else if (type == NodeType.RestSite && CheckAttainableSameNode(item.Value[i], NodeType.Market, preLevel, nodeDataList)) //연결된 경로에 현재 여관 - 마켓이 있는지
+                                {
+                                    type = NodeType.Battle;
+                                }
+                            }
+                        }
+                    }
+                    if (item.Key + 1 == Util.GetPageStageCount(Util.GetChapter(), Util.GetCurrentGamePage())) // 마지막 라인
+                    {
+                        type = NodeType.Boss;
+                    }
+
+                    //nodeTypeList.Add(type);
+
+                    nodeTypeList.Add(type);
+                }
+
+                //  if (Util.GetChapter() != 102)
+                // {
+                for (int i = 0; i < perList.Count; i++)
+                {
+                    if (perList[i] == 100)
+                    {
+                        absoluteType = perDict[i];
+                    }
+                }
+
+                ObscuredInt absoluteTypeCount = 0;
+
+                for (int i = 0; i < nodeTypeList.Count; i++)
+                {
+                    if (nodeTypeList[i] == absoluteType)
+                    {
+                        absoluteTypeCount++;
+                    }
+                    else if (nodeTypeList[i] == NodeType.Boss)
+                    {
+                        absoluteTypeCount++;
+                    }
+                }
+                if (absoluteType != NodeType.Null && item.Key != Util.GetPageStageCount(Util.GetChapter(), Util.GetCurrentGamePage()) - 1)
+                    if (absoluteTypeCount == 0) // 절대 나올 타입이 나오지 않았다면,
+                    {
+                        int random = Random.Range(0, countInfoList[item.Key]);
+                        nodeTypeList[random] = absoluteType;
+                    }
+                //  }
+
+                List<pfIsland> islandList = MapContainer.Instance.NodeDict[item.Key].ToList();
+
+                List<NodeData> nodeDatas = new List<NodeData>();
+
+                NodeData data = null;
+
+                for (int i = 0; i < countInfoList[item.Key]; i++)
+                {
+                    switch (nodeTypeList[i])
+                    {
+                        case NodeType.Boss:
+                        case NodeType.GreenKnight:
+                        case NodeType.Battle:
+                            ObscuredInt stageNo = Util.GetStageNo(Util.GetChapter(), Util.GetCurrentGamePage(), item.Value[i].level);
+
+                            List<ObscuredInt> list = new List<ObscuredInt>();
+
+                            if (nodeTypeList[i] == NodeType.GreenKnight)
+                            {
+                                list = Util.GetEnemyAssignList(item.Key, stageNo, StageType.GreenKnight);
+                            }
+                            else
+                            {
+                                list = Util.GetEnemyAssignList(item.Key, stageNo, StageType.Battle);
+                            }
+
+                            if (list.Count == 0) // 몬스터 할당 데이터가 없을 경우를 대비하여
+                            {
+                                list.Add(MN_Data.Instance.tdMonsterSetDict.First().Value.seatNo1);
+                                list.Add(MN_Data.Instance.tdMonsterSetDict.First().Value.seatNo2);
+                                list.Add(MN_Data.Instance.tdMonsterSetDict.First().Value.seatNo3);
+                            }
+
+                            data = new NodeData(nodeTypeList[i], null, list);
+                            nodeDatas.Add(data);
+                            break;
+
+                        case NodeType.Event:
+                            EventInfoData eventInfoData = MakeEventData();
+                            data = new NodeData(nodeTypeList[i], eventInfoData, null);
+                            nodeDatas.Add(data);
+                            break;
+                        default:
+                            data = new NodeData(nodeTypeList[i], null, null);
+                            nodeDatas.Add(data);
+                            break;
+                    }
+                    islandList[i].SetNodeType(nodeTypeList[i]);
+                }
+                nodeDataList.Add(nodeDatas);
+            }
+
+            //이벤트 개수가 최소조건을 허용해야한다!
+
+            if (Util.GetChapter() != 102)
+            {
+                List<ObscuredInt> eventExistLvList = new List<ObscuredInt>(); //이벤트가 존재하는 스테이지 레벨 리스트
+
+                for (int i = 0; i < nodeDataList.Count; i++)
+                {
+                    for (int j = 0; j < nodeDataList[i].Count; j++)
+                    {
+                        if (nodeDataList[i][j].nodeType == NodeType.Event)
+                        {
+                            eventExistLvList.Add(i);
+                        }
+                    }
+                }
+
+                if (eventExistLvList.Count < StaticSet.minEventTotalCount)
+                {
+                    List<ObscuredInt> exceptionLevel = new List<ObscuredInt>(); //이벤트 배치 퍼센트가 0인 레벨은 랜덤뽑기에서 제외.
+
+                    foreach (var item in MN_Data.Instance.tdMapDict[Util.GetChapter()][Util.GetCurrentGamePage()])
+                    {
+                        if (item.Value.eventPer == 0)
+                            exceptionLevel.Add(item.Key);
+                    }
+
+                    for (int i = 0; i < eventExistLvList.Count; i++)
+                    {
+                        exceptionLevel.Add(eventExistLvList[i]);
+                        exceptionLevel.Add(eventExistLvList[i] - 1);
+                        exceptionLevel.Add(eventExistLvList[i] + 1);
+                    }
+
+                    List<ObscuredInt> totlaLvList = new List<ObscuredInt>();
+                    ObscuredInt stageCount = Util.GetPageStageCount(Util.GetChapter(), Util.GetCurrentGamePage());
+                    ObscuredInt needEventCount = StaticSet.minEventTotalCount - eventExistLvList.Count; //몇개나 부족한지
+
+                    for (int i = 4; i < stageCount; i++)
+                    {
+                        if (!exceptionLevel.Contains(i))
+                            totlaLvList.Add(i);
+                    }
+
+                    List<ObscuredInt> randomLvList = new List<ObscuredInt>(); //랜덤 이벤트 배치 레벨
+
+                    for (int i = 0; i < needEventCount; i++)
+                    {
+                        ObscuredInt lv = Random.Range(0, totlaLvList.Count);
+
+                        if (!randomLvList.Contains(lv))
+                            randomLvList.Add(lv);
+                        else
+                            i--;
+                    }
+
+                    for (int i = 0; i < randomLvList.Count; i++)
+                    {
+                        ObscuredInt lv = randomLvList[i];
+                        ObscuredInt idx = Random.Range(0, countInfoList[lv]);
+
+                        EventInfoData eventInfoData = MakeEventData();
+                        nodeDataList[lv][idx] = new NodeData(NodeType.Event, eventInfoData, null);
+                    }
+                }
+            }
+            MapManager.Instance.nodeDataList = nodeDataList.ToList();
+        }
+        else
+        {
+            nodeDataList = MapManager.Instance.CurMap.nodeDataList;
+        }
+
+        foreach (var item in MapContainer.Instance.NodeDict)
+        {
+            for (int i = 0; i < countInfoList[item.Key]; i++)
+            {
+                NodeData nodeData = nodeDataList[item.Key][i];
+
+                item.Value[i].SetNodeType(nodeData.nodeType);
+                item.Value[i].SetBattleInfo(nodeData.battleList);
+                item.Value[i].SetEventInfo(nodeData.eventInfoData);
+            }
+        }
+    }
+
+    EventInfoData MakeEventData()
+    {
+        #region db data list
+        List<ObscuredString> eventDesKeyList = new List<ObscuredString>();
+        ObscuredString[] eventImageNameArray = { "bg_event_characters_1", "bg_event_characters_2", "bg_event_characters_3", "bg_event_characters_4" };
+        List<ObscuredInt> perEventList = new List<ObscuredInt>() { 15, 85, 15, 15 }; //이미지가 나올 확률 적용
+
+        ObscuredInt chapter = Util.GetChapter();
+
+        ObscuredInt curPage = Util.GetCurrentGamePage();
+
+        ObscuredInt nameCount = 0;
+
+        List<TDLocalText> localList = Util.GetLocalTextListByType("EventInfo");
+        for (int i = 0; i < localList.Count; i++)
+        {
+            if (localList[i].key.ToString().Contains(string.Format("ui_text_eventDes{0}_{1}", chapter, curPage)))
+            {
+                nameCount++;
+            }
+        }
+
+        for (int i = 0; i < nameCount; i++)
+        {
+            eventDesKeyList.Add(string.Format("ui_text_eventDes{0}_{1}_{2}", chapter, curPage, (i + 1)));
+        }
+        #endregion
+
+        ObscuredString eventDesKey = eventDesKeyList[Random.Range(0, eventDesKeyList.Count)];
+        ObscuredString thumbImageName = eventImageNameArray[Util.RandomPercent(perEventList)];
+
+        EventInfoData eventInfoData = new EventInfoData(0, eventDesKey, thumbImageName);
+
+        return eventInfoData;
+    }
+
+
+    public ObscuredInt MakeEventNo()
+    {
+        List<ObscuredInt> eventNoList = new List<ObscuredInt>();
+        ObscuredInt chapter = Util.GetChapter();
+        ObscuredInt curPage = Util.GetCurrentGamePage();
+        ObscuredInt eventNo = 1001; // 이벤트 db가 챕터와 페이지에 맞게 설정이 없어서 임시 배분.
+
+        foreach (var item2 in MN_Data.Instance.tdEventDict)
+        {
+            if (item2.Value.chapterNo == chapter)
+            {
+                if (item2.Value.page == curPage || item2.Value.page == 0)
+                    eventNoList.Add(item2.Key);
+            }
+        }
+
+        List<ObscuredInt> filteredList = new List<ObscuredInt>();
+
+        for (int i = 0; i < eventNoList.Count; i++)
+        {
+            if (!MapContainer.Instance.ExceptEventList.Contains(eventNoList[i])) //이벤트 얼개에 따른 제외 이벤트 리스트
+            {
+                filteredList.Add(eventNoList[i]);
+            }
+        }
+
+        if (filteredList.Count > 0)
+            eventNo = filteredList[Random.Range(0, filteredList.Count)];
+
+        return eventNo;
+    }
+
+    ObscuredBool CheckAttainableSameNode(pfIsland node, NodeType type, ObscuredInt compareLevel, List<List<NodeData>> nodeDataList) // 비교 라인 인덱스
+    {
+        ObscuredBool exist = false;
+        ObscuredInt level = node.level;
+        ObscuredInt compareLine = compareLevel;
+
+        Dictionary<ObscuredInt, List<List<MapPoint>>> dataDict;
+
+        if (node.level > compareLevel) //이전 레벨과 비교
+            dataDict = MapManager.Instance.inComingDict;
+        else
+            dataDict = MapManager.Instance.outGoingDict;
+
+        if (dataDict.ContainsKey(level)) //내 노드에 연결된 줄.
+        {
+            for (int a = 0; a < dataDict[level].Count; a++)
+            {
+                for (int b = 0; b < dataDict[level][a].Count; b++)
+                {
+                    if (nodeDataList.Count > compareLine)
+                    {
+                        if (nodeDataList[compareLine].Count > b)
+                        {
+                            NodeType comparisonType = nodeDataList[compareLine][b].nodeType;
+                            if (comparisonType == type)
+                            {
+                                exist = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return exist;
+    }
+
+    public void makeExceptEventList()
+    {
+        ObscuredInt curLevel = Util.GetStageLevel();
+        //현재 레벨 미만의 이벤트 no 검사
+        List<ObscuredInt> exceptList = new List<ObscuredInt>();
+
+        foreach (var item in MapContainer.Instance.NodeDict)
+        {
+            if (item.Key < curLevel) //현재 보다 이전 레벨 중, 이벤트인 노드
+                for (int i = 0; i < item.Value.Count; i++)
+                {
+                    if (item.Value[i].nodeType == NodeType.Event)
+                    {
+                        ObscuredInt eventNo = item.Value[i].eventInfoData.EventNo;
+
+                        if (MN_Data.Instance.tdEventDict.ContainsKey(eventNo))
+                            foreach (var item2 in MN_Data.Instance.tdEventDict[eventNo].eventActionDict)
+                            {
+                                for (int j = 0; j < item2.Value.Count; j++)
+                                {
+                                    if (item2.Value[j].actionType == ActionType.RemoveEvent)
+                                    {
+                                        Debug.Log("# 얼개에 따른 제외 이벤트 리스트에 추가  " + int.Parse(item2.Value[j].val));
+                                        exceptList.Add(int.Parse(item2.Value[j].val));
+                                    }
+                                }
+                            }
+                    }
+                }
+        }
+
+        MapContainer.Instance.ExceptEventList = exceptList.ToList();
+    }
+
+    public void AssignNodePath()
+    {
+        foreach (var item in inComingDict) //key : lv, value : List<List<MapPoint>> : index
+        {
+            for (int i = 0; i < item.Value.Count; i++)
+            {
+                List<pfIsland> pfList = new List<pfIsland>();
+                ObscuredInt curLevel = item.Key;
+                List<MapPoint> list = item.Value[i].ToList();
+
+                for (int j = 0; j < item.Value[i].Count; j++)
+                {
+                    ObscuredInt lv = list[j].level;
+                    ObscuredInt index = list[j].index;
+                    pfList.Add(MapContainer.Instance.NodeDict[lv][index]);
+                }
+                if (i < MapContainer.Instance.NodeDict[item.Key].Count)
+                    MapContainer.Instance.NodeDict[item.Key][i].SetInComingNodes(pfList);
+            }
+        }
+
+        foreach (var item in outGoingDict) //key : lv, value : List<List<MapPoint>> : index
+        {
+            for (int i = 0; i < item.Value.Count; i++)
+            {
+                List<pfIsland> pfList = new List<pfIsland>();
+                ObscuredInt curLevel = item.Key;
+                List<MapPoint> list = item.Value[i].ToList();
+
+                for (int j = 0; j < list.Count; j++)
+                {
+                    ObscuredInt lv = list[j].level;
+                    ObscuredInt index = list[j].index;
+
+                    pfList.Add(MapContainer.Instance.NodeDict[lv][index]);
+                }
+                if (i < MapContainer.Instance.NodeDict[item.Key].Count)
+                    MapContainer.Instance.NodeDict[item.Key][i].SetOutGoingNodes(pfList);
+            }
+        }
+    }
+
+
+}
+//NodeData 의 정보는 일괄 적용된다. save  load
+
+[System.Serializable]
+public class NodeData
+{
+    public NodeType nodeType;
+    public EventInfoData eventInfoData;
+    public List<ObscuredInt> battleList;
+
+
+    public NodeData(NodeType type, EventInfoData eventInfoData, List<ObscuredInt> battleList)
+    {
+        this.nodeType = type;
+        this.eventInfoData = eventInfoData;
+        this.battleList = battleList;
+    }
+}
+
+
+
+
