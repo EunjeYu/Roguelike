@@ -1,0 +1,126 @@
+using System;
+using System.Linq;
+using UnityEngine;
+using CodeStage.AntiCheat.ObscuredTypes;
+
+namespace Map
+{
+    public class MapPlayerTracker : MonoBehaviour
+    {
+        public bool lockAfterSelecting = false;
+        public float enterNodeDelay = 1f;
+        public MapManager mapManager;
+        public MapView view;
+        public bool Locked { get; set; }
+        private MapNode saveMapNode; //게임 입장을 위해 선택된 노드 -> m.path에 이벤트 모두 종료 후 등록하기 때문에 따로 saveMapNode에 저장.
+
+        public void SelectNode(MapNode mapNode) // ver2 non use
+        {
+            if (Locked) return;
+
+            // Debug.Log("Selected node: " + mapNode.Node.point);
+
+            if (mapManager.CurrentMap.path.Count == 0)
+            {
+                if (mapNode.Node.point.y == 0) //플레이어 이동경로가 없으므로, y가 0인 노드는 모두 accessible
+                    ClickAttainableNode(mapNode);
+                else
+                    PlayWarningThatNodeCannotBeAccessed(mapNode);
+            }
+            else
+            {
+                var currentPoint = mapManager.CurrentMap.path[mapManager.CurrentMap.path.Count - 1];
+                var currentNode = mapManager.CurrentMap.GetNode(currentPoint);
+
+                if (currentNode != null && currentNode.outgoing.Any(point => point.Equals(mapNode.Node.point))) //현재 노드에서 클릭한 노드로 연결이 되어 있다면,
+                    ClickAttainableNode(mapNode);
+                else
+                    PlayWarningThatNodeCannotBeAccessed(mapNode);
+            }
+
+            mapNode.ShowMiniInfo();
+        }
+
+        private void ClickAttainableNode(MapNode mapNode) // version 2 non node
+        {
+            view.SetAttainableNodes();
+            //mapNode.ShowSwirlAnimation();
+        }
+
+        public void UpdatePlayerToNode()
+        {
+            // if ((Util.GetStageLevel() + 1) <= MN_Data.Instance.tdMapDict[Util.GetChapter()][Util.GetCurrentGamePage()].Count)
+            MapManager.Instance.UpdateStageLv();
+        }
+
+
+        public void EnterNode(pfIsland node)
+        {
+            // if (MN_Game.IS_DEV)
+            //     MapUILayer.Instance.ShowEventLayer(MN_InGameData.Instance.curEventNo);
+            // else
+                switch (node.nodeType)
+                {
+                    case NodeType.GreenKnight:
+
+                        EnterBattle();
+                        break;
+                    case NodeType.Battle:
+                        MN_InGameData.Instance.MinusCopyCatPassiveCount();
+                        EnterBattle();
+                        break;
+                    case NodeType.RestSite:
+                        MapUILayer.Instance.ShowRecoveryEventLayer();
+                        break;
+                    case NodeType.Market:
+                        MapUILayer.Instance.ShowMarketEventLayer();
+                        break;
+                    case NodeType.Boss:
+                        EnterBattle();
+                        break;
+                    case NodeType.Event:
+                        MapUILayer.Instance.ShowEventLayer(MN_InGameData.Instance.curEventNo);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
+         //   MapManager.Instance.ShowMap(false);
+
+            MN_InGameData.Instance.moveLogCount++;
+
+            if (MN_InGameData.Instance.GetJobType() == JobType.Freeman)
+            {
+                if (MN_InGameData.Instance.moveLogCount <= 2)
+                {
+                    return;
+                }
+            }
+        }
+
+        void EnterBattle(MapNode mapNode) //배틀매니저에 정보 등록
+        {
+            MapUILayer.Instance.TransitionAni(() =>
+            {
+                NS_Battle.MN_Ingame.Instance.ChangeFSMState(IngameState.eBattleState, StaticSet.ZeroSeconds);
+            });
+        }
+
+        void EnterBattle() //배틀매니저에 정보 등록
+        {
+            MapUILayer.Instance.TransitionAni(() =>
+            {
+                NS_Battle.MN_Ingame.Instance.ChangeFSMState(IngameState.eBattleState, StaticSet.ZeroSeconds);
+            });
+        }
+
+        private void PlayWarningThatNodeCannotBeAccessed(MapNode mapNode)
+        {
+            Debug.Log("선택 노드로 이동 할 수 없습니다.");
+            view.SetAttainableNodes();
+            MapView.Instance.minipopCtrl = false;
+        }
+
+
+    }
+}
