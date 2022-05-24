@@ -1,0 +1,68 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using CodeStage.AntiCheat.ObscuredTypes;
+public class GachaData
+{
+    public ObscuredInt supporterNo;
+    public ObscuredInt preLevel;
+    public ObscuredInt updateLevel;
+    public ObscuredInt rewardCount;
+}
+public class GachaDataManager : MonoBehaviour
+{
+    //위 클래스는, 다회 가챠의 경우에 사용.
+    public List<GachaData> gachaDataList { get; private set; }
+
+    public void AddGachaData(ObscuredInt supporterNo)
+    {
+        if (gachaDataList == null)
+            gachaDataList = new List<GachaData>();
+
+        GachaData gachaData = new GachaData();
+        gachaData.supporterNo = supporterNo;
+
+        ObscuredInt preLevel = Util.GetSupporterLevel(supporterNo);
+
+        gachaData.preLevel = preLevel;
+
+        gachaData.updateLevel = preLevel;
+
+        gachaData.rewardCount = 0;
+
+        gachaDataList.Add(gachaData);
+    }
+
+    public void UpdateSupporterLevel(ObscuredInt supporterNo, ObscuredInt newLevel)
+    {
+        for (int i = gachaDataList.Count - 1; i > -1; i--)
+        {
+            if (gachaDataList[i].supporterNo == supporterNo) // 단일 결과 UI에 쓰일 data를 위해, 같은 서포터가 있을 경우, 후순위 기준만 업데이트 레벨변경
+            {
+                gachaDataList[i].preLevel = newLevel - 1;
+                gachaDataList[i].updateLevel = newLevel;
+
+                i = -1; //반복문 종료
+            }
+        }
+    }
+
+
+    public void DeleteGachaData()
+    {
+        this.gachaDataList = new List<GachaData>();
+    }
+
+    public void UpdateRewardCount(ObscuredInt supporterNo)
+    {
+        for (int i = 0; i < gachaDataList.Count; i++)
+        {
+            if (gachaDataList[i].supporterNo == supporterNo)
+            {
+                gachaDataList[i].rewardCount = 1; //같은 동료가 뽑혔을 때, 후순위로 뽑힌 동료만 리워드지급
+                i = gachaDataList.Count;
+            }
+        }
+    }
+
+}
