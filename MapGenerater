@@ -1,0 +1,378 @@
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace Map
+{
+    public static class MapGenerator
+    {
+        private static MapConfig config;
+
+        private static readonly List<NodeType> RandomNodes = new List<NodeType>
+        {NodeType.Market, NodeType.Battle, NodeType.RestSite, NodeType.Event};
+
+        private static List<float> layerDistances;
+        private static List<List<MapNodePoint>> paths;
+        // ALL nodes by layer:
+        private static readonly List<List<Node>> nodes = new List<List<Node>>();
+
+        public static Map GetMap(MapConfig conf)
+        {
+            if (conf == null)
+            {
+                Debug.LogWarning("Config was null in MapGenerator.Generate()");
+                return null;
+            }
+
+            config = conf;
+            nodes.Clear();
+
+            GenerateLayerDistances();
+
+            SetWidth();
+
+            GeneratePaths();
+
+            for (var i = 0; i < conf.layers.Count; i++)
+                PlaceLayer(i);
+            //RandomizeNodePositions();
+
+            SetUpConnections();
+
+            RemoveCrossConnections();
+
+            // select all the nodes with connections:
+            var nodesList = nodes.SelectMany(n => n).Where(n => n.incoming.Count > 0 || n.outgoing.Count > 0).ToList();
+
+            // pick a random name of the boss level for this map:
+            var bossNodeName = config.nodeBlueprints.Where(b => b.nodeType == NodeType.Boss).ToList().Random().name;
+            return new Map(conf.name, bossNodeName, SetWidth(), nodesList, new List<MapNodePoint>()); ;
+        }
+
+        private static void GenerateLayerDistances()
+        {
+            layerDistances = new List<float>();
+            foreach (var layer in config.layers)
+            {
+                layerDistances.Add(layer.distanceFromPreviousLayer.GetValue());
+            }
+        }
+
+        private static float SetWidth()
+        {
+            float width = 0;
+
+            for (int i = 0; i < layerDistances.Count; i++)
+            {
+                width += layerDistances[i];
+            }
+
+            return width;
+        }
+
+        private static float GetDistanceToLayer(int layerIndex)
+        {
+            if (layerIndex < 0 || layerIndex > layerDistances.Count) return 0f;
+
+            return layerDistances.Take(layerIndex + 1).Sum();
+        }
+
+        private static void PlaceLayer(int layerIndex) //각 노드의 타입을 정함.
+        {
+            var layer = config.layers[layerIndex];
+            var nodesOnThisLayer = new List<Node>();
+
+            // offset of this layer to make all the nodes centered:
+            //var offset = layer.nodesApartDistance * config.GridWidth;
+            float mapHeight = MapView.Instance.mapParent.GetComponent<RectTransform>().rect.height;
+            //int height = 910;
+            int height = (int)mapHeight; //740
+            int spaceY = height / (config.GridWidth + 1); //148
+            int offset = height / 2 - spaceY; //247 - 148 =
+
+            for (var i = 0; i < config.GridWidth; i++)
+            {
+                var nodeType = Random.Range(0f, 1f) < layer.randomizeNodes ? GetRandomNode(layerIndex) : layer.nodeType;
+
+                //>>>>>>>>>>> 맵에서 상점과 여관이 각 라인당 1개 이상 못나오게
+
+                int marketCount = 0;
+                int restsiteCount = 0;
+                int mysteryCount = 0;
+
+                for (int j = 0; j < nodes.Count; j++)
+                {
+                    if (nodes[j][i].nodeType == NodeType.Market)
+                        marketCount++;
+
+                    if (nodes[j][i].nodeType == NodeType.RestSite)
+                        restsiteCount++;
+                }
+
+                if (marketCount == 5 && nodeType == NodeType.Market)
+                {
+                    nodeType = NodeType.Battle;
+                }
+
+                if (restsiteCount == 5 && nodeType == NodeType.RestSite)
+                {
+                    nodeType = NodeType.Battle;
+                }
+
+
+                var blueprintName = config.nodeBlueprints.Where(b => b.nodeType == nodeType).ToList().Random().name;
+                //랜덤으로 pick한 nodeType과 같은 type인 노드를 nodebluePrint리스트에서 랜덤으로 고름
+                var node = new Node(nodeType, blueprintName, new MapNodePoint(i, layerIndex), string.Format("node{0}_{1}", layerIndex, i))
+                {
+                    position = new Vector2(150 + GetDistanceToLayer(layerIndex), (height / 2 - 80) - i * (100)/*offset - i * spaceY*/)
+                };
+
+                nodesOnThisLayer.Add(node);
+            }
+
+            nodes.Add(nodesOnThisLayer);
+        }
+
+        private static void RandomizeNodePositions()
+        {
+            for (var index = 0; index < nodes.Count; index++)
+            {
+                var list = nodes[index];
+                var layer = config.layers[index];
+                var distToNextLayer = index + 1 >= layerDistances.Count
+                    ? 0f
+                    : layerDistances[index + 1];
+                var distToPreviousLayer = layerDistances[index];
+
+                foreach (var node in list)
+                {
+                    var xRnd = Random.Range(-1f, 1f);
+                    var yRnd = Random.Range(-1f, 1f);
+
+                    //var x = xRnd * layer.nodesApartDistance / 4f; //나누는 수가 커질 수록 폭이 줄어드는 구조인데, 배경의 height 를 기준으로 변해야할 듯함
+                    var y = yRnd < 0 ? distToPreviousLayer * yRnd / 2f : distToNextLayer * yRnd / 2f;
+                    node.position += new Vector2(y, 0) * layer.randomizePosition;
+                }
+            }
+        }
+
+        private static void SetUpConnections()
+        {
+            foreach (var path in paths)
+            {
+                for (var i = 0; i < path.Count; i++)
+                {
+                    var node = GetNode(path[i]);
+
+                    if (i > 0)
+                    {
+                        // previous because the path is flipped
+                        var nextNode = GetNode(path[i - 1]);
+                        nextNode.AddIncoming(node.point);
+                        node.AddOutgoing(nextNode.point);
+                    }
+
+                    if (i < path.Count - 1)
+                    {
+                        var previousNode = GetNode(path[i + 1]);
+                        previousNode.AddOutgoing(node.point);
+                        node.AddIncoming(previousNode.point);
+                    }
+                }
+            }
+        }
+
+        private static void RemoveCrossConnections()
+        {
+            for (var i = 0; i < config.GridWidth - 1; i++)
+                for (var j = 0; j < config.layers.Count - 1; j++)
+                {
+                    var node = GetNode(new MapNodePoint(i, j));
+                    if (node == null || node.HasNoConnections()) continue;
+                    var right = GetNode(new MapNodePoint(i + 1, j));
+                    if (right == null || right.HasNoConnections()) continue;
+                    var top = GetNode(new MapNodePoint(i, j + 1));
+                    if (top == null || top.HasNoConnections()) continue;
+                    var topRight = GetNode(new MapNodePoint(i + 1, j + 1));
+                    if (topRight == null || topRight.HasNoConnections()) continue;
+
+                    // Debug.Log("Inspecting node for connections: " + node.point);
+                    if (!node.outgoing.Any(element => element.Equals(topRight.point))) continue;
+                    if (!right.outgoing.Any(element => element.Equals(top.point))) continue;
+
+                    // Debug.Log("Found a cross node: " + node.point);
+
+                    // we managed to find a cross node:
+                    // 1) add direct connections:
+                    node.AddOutgoing(top.point);
+                    top.AddIncoming(node.point);
+
+                    right.AddOutgoing(topRight.point);
+                    topRight.AddIncoming(right.point);
+
+                    var rnd = Random.Range(0f, 1f);
+                    if (rnd < 0.2f)
+                    {
+                        // remove both cross connections:
+                        // a)
+                        node.RemoveOutgoing(topRight.point);
+                        topRight.RemoveIncoming(node.point);
+                        // b)
+                        right.RemoveOutgoing(top.point);
+                        top.RemoveIncoming(right.point);
+                    }
+                    else if (rnd < 0.6f)
+                    {
+                        // a)
+                        node.RemoveOutgoing(topRight.point);
+                        topRight.RemoveIncoming(node.point);
+                    }
+                    else
+                    {
+                        // b)
+                        right.RemoveOutgoing(top.point);
+                        top.RemoveIncoming(right.point);
+                    }
+                }
+        }
+
+        private static Node GetNode(MapNodePoint p)
+        {
+            if (p.y >= nodes.Count) return null;
+            if (p.x >= nodes[p.y].Count) return null;
+
+            return nodes[p.y][p.x];
+        }
+
+        private static MapNodePoint GetStartNode()
+        {
+            if (config.GridWidth % 2 == 1)
+                return new MapNodePoint(config.GridWidth / 2, 0);
+
+            return Random.Range(0, 2) == 0
+                ? new MapNodePoint(config.GridWidth / 2, 0)
+                : new MapNodePoint(config.GridWidth / 2 - 1, 0);
+        }
+
+        private static MapNodePoint GetFinalNode()
+        {
+            var y = config.layers.Count - 1;
+            if (config.GridWidth % 2 == 1)
+                return new MapNodePoint(config.GridWidth / 2, y);
+
+            return Random.Range(0, 2) == 0
+                ? new MapNodePoint(config.GridWidth / 2, y)
+                : new MapNodePoint(config.GridWidth / 2 - 1, y);
+        }
+
+        private static void GeneratePaths()
+        {
+            var startNode = GetStartNode();
+
+            var finalNode = GetFinalNode();
+            paths = new List<List<MapNodePoint>>();
+
+            var numOfStartingNodes = config.numOfStartingNodes.GetRandomValue(); // only one
+                                                                                 //      Debug.Log("# numOfStatingNodes " + numOfStartingNodes);
+
+            var numOfPreBossNodes = config.numOfPreBossNodes.GetRandomValue();
+            //  Debug.Log("# numOfPreBossNodes " + numOfPreBossNodes);
+
+            var candidateXs = new List<int>();
+
+            for (var i = 0; i < config.GridWidth; i++)
+            {
+                candidateXs.Add(i);
+            }
+
+            // candidateXs.Shuffle(); //temp
+
+            var preBossXs = candidateXs.Take(numOfPreBossNodes);
+
+            var preBossPoints = (from x in preBossXs select new MapNodePoint(x, finalNode.y - 1)).ToList();
+
+            //  Debug.Log("# preBossPoints " + preBossPoints.Count);
+
+            var attempts = 0;
+
+            // match line from Boss ~ to first layer
+            foreach (var point in preBossPoints)
+            {
+                var path = Path(point, 1, config.GridWidth);
+                path.Insert(0, finalNode);
+                paths.Add(path);
+                attempts++;
+            }
+
+            while (!PathsLeadToAtLeastNDifferentPoints(paths, numOfStartingNodes) && attempts < 100)
+            {
+                var randomPreBossPoint = preBossPoints[UnityEngine.Random.Range(0, preBossPoints.Count)];
+                //  Debug.Log("# RandomPreBossPoint " + randomPreBossPoint);
+                var path = Path(randomPreBossPoint, 1, config.GridWidth);
+                path.Insert(0, finalNode);
+                paths.Add(path);
+                attempts++;
+            }
+
+            for (int i = 0; i < paths.Count; i++)
+            {
+                paths[i].Add(startNode);
+            }
+        }
+
+        private static bool PathsLeadToAtLeastNDifferentPoints(IEnumerable<List<MapNodePoint>> paths, int n)
+        {
+            return (from path in paths select path[path.Count - 1].x).Distinct().Count() >= n;
+        }
+
+        private static List<MapNodePoint> Path(MapNodePoint from, int toY, int width, bool firstStepUnconstrained = false)
+        {
+            if (from.y == toY)
+            {
+                Debug.LogError("Points are on same layers, return");
+                return null;
+            }
+
+            // making one y step in this direction with each move
+            var direction = from.y > toY ? -1 : 1;
+            var path = new List<MapNodePoint> { from };
+
+            while (path[path.Count - 1].y != toY)
+            {
+                var lastPoint = path[path.Count - 1];
+                var candidateXs = new List<int>();
+                if (firstStepUnconstrained && lastPoint.Equals(from))
+                {
+                    for (var i = 0; i < width; i++)
+                        candidateXs.Add(i);
+                }
+                else
+                {
+                    // forward
+                    candidateXs.Add(lastPoint.x);
+                    // left
+                    if (lastPoint.x - 1 >= 0) candidateXs.Add(lastPoint.x - 1);
+                    // right
+                    if (lastPoint.x + 1 < width) candidateXs.Add(lastPoint.x + 1);
+                }
+
+                var nextPoint = new MapNodePoint(candidateXs[Random.Range(0, candidateXs.Count)], lastPoint.y + direction);
+
+                path.Add(nextPoint);
+            }
+
+            return path;
+        }
+
+        private static NodeType GetRandomNode(int layerIndex)
+        {
+            if (layerIndex < 2)
+                return NodeType.Battle;
+
+            if (layerIndex == 1)
+                return NodeType.Market;
+
+            return RandomNodes[Random.Range(0, RandomNodes.Count)];
+        }
+    }
+}
