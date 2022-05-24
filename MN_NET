@@ -1,0 +1,517 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using CodeStage.AntiCheat.ObscuredTypes;
+using CodeStage.AntiCheat.Storage;
+using Newtonsoft.Json.Linq;
+//using PlayFab;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+//using PlayFab.ClientModels;
+using UnityEngine;
+using PlayNANOO.SimpleJSON;
+using PlayNANOO.CloudCode;
+using PlayNANOO;
+using System.Threading.Tasks;
+// ########################
+// ## Network Manager
+// ## 싱글톤
+// ## 서버와 통신을 전체적으로 관리하기 위한 클래스
+// ########################
+
+public enum PTErrorCode
+{
+    INVALID_SESSION = -2, // 세션이 유효하지 않음. (여러기기에서 동시에 다중 접속한 경우)
+    REQUIRED_NEW_VERSION = -3 // 클라이언트 앱 버전이 낮음 (업데이트하도록 스토어로 유도)
+}
+public enum NetActionKey
+{
+    checkInternet, validateToken, askLogin, login, save, load, actionKey, purchase, none, initRoutine, end, noInternetAlert, failLoginAlert, saveClearAlert, saveFailAlert, loadCancleAlert, loadClearAlert, cancelPurchase, SetUserData, CompleteBuySave
+}
+public class MN_Net : MonoBehaviour
+{
+    public static MN_Net Instance = null;
+
+    private Action<JObject> finishCallback;
+    //private Action<PlayFabError> errorCallback;
+    private ObscuredBool isNetworking;
+    Plugin plugin;
+
+    #region netSequence
+    System.Func<ObscuredBool> clearFunc;
+    // System.Func<ObscuredBool> failFunc;
+    Dictionary<NetActionKey, NetActionKey[]> netExcuteDict;
+    Dictionary<NetActionKey, Action> netFuncDict;
+    NetActionKey firstActionKey;
+    NetActionKey curNetActionKey;
+    NetActionKey preNetActionKey;
+    #endregion
+    void Awake()
+    {
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+        isNetworking = false;
+        netFuncDict = new Dictionary<NetActionKey, Action>();
+        DeclareNetAction();
+    }
+
+    void DeclareNetAction()
+    {
+        netFuncDict.Add(NetActionKey.checkInternet, TestCheckInternet);
+        netFuncDict.Add(NetActionKey.noInternetAlert, AlertNoInternet);
+        netFuncDict.Add(NetActionKey.validateToken, TestValidateToken);
+        netFuncDict.Add(NetActionKey.askLogin, AskLogin);
+        netFuncDict.Add(NetActionKey.login, OpenLogin);
+        netFuncDict.Add(NetActionKey.save, SaveCloudData);
+        netFuncDict.Add(NetActionKey.failLoginAlert, AlertLoginFail);
+        netFuncDict.Add(NetActionKey.saveClearAlert, AlertClearSave);
+        netFuncDict.Add(NetActionKey.saveFailAlert, AlertFailSave);
+        netFuncDict.Add(NetActionKey.load, LoadCloudData);
+        netFuncDict.Add(NetActionKey.loadCancleAlert, AlertCancleLoad);
+        netFuncDict.Add(NetActionKey.loadClearAlert, AlertClearLoad);
+        netFuncDict.Add(NetActionKey.cancelPurchase, AlertCancelPurchase);
+        netFuncDict.Add(NetActionKey.purchase, Purchase);
+        netFuncDict.Add(NetActionKey.CompleteBuySave, CompletePurchse);
+    }
+
+    // 통신 시작할때 호출하는 함수
+    public void StartNetwork()
+    {
+        isNetworking = true;
+        MN_Layer.Instance.ShowLoadingLayer();
+    }
+
+    // 통신 종료 후 호출하는 함수
+    public string EndNetwork(object resultOrError = null)
+    {
+        Debug.Log("MN_NET :: EndNetwork");
+        isNetworking = false;
+        MN_Layer.Instance.HideLoadingLayer();
+
+        Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
+        string resultJsonString = "resultOrError is null";
+        if (resultOrError != null)
+            resultJsonString = Newtonsoft.Json.JsonConvert.SerializeObject(resultOrError);
+        Debug.Log("result ALL DATA :\n");
+        Debug.Log(resultJsonString);
+        Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.ScriptOnly);
+
+        return resultJsonString;
+    }
+
+    public void AlertCancelPurchase()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_cancelbuyItem"), Util.GetLocalText("check"), null);
+    }
+
+    public void AlertClearSave()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_clear_cloudSave"), Util.GetLocalText("ui_text_check"), null);
+    }
+
+    public void AlertFailSave()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_failSave_server"), Util.GetLocalText("ui_text_check"), null);
+    }
+
+    void AlertClearLoad()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_clear_cloudLoad"), Util.GetLocalText("ui_text_check"), null);
+    }
+
+    void AlertCancleLoad()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_cancleLoad_server"), Util.GetLocalText("ui_text_check"), null);
+    }
+
+    void AlertLoginFail()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_failed_login"), Util.GetLocalText("ui_text_check"), null);
+    }
+
+    void AlertNoInternet()
+    {
+        AlertLayer.ShowOneButton(Util.GetLocalText("ui_text_notice"), Util.GetLocalText("ui_notice_need_internet"), Util.GetLocalText("ui_text_check"), null);
+    }
+
+    void SaveCloudData()
+    {
+        plugin = Plugin.GetInstance();
+        string uuid = ObscuredPrefs.GetString(MN_Game.Instance.GetUserAuthKey());
+        //Debug.Log("# MN_NET >> SaveStorageData >> uuid :" + uuid);
+
+        MN_Data.Instance.userMe.SavedDate = Util.GetCurrentDataTime();
+
+        UserData userData = MN_Data.Instance.userMe.GetUserData();
+        Debug.Log(
+            " getUserData >> actionKey" + userData.actionKey
+        );
+        BinaryFormatter bf = new BinaryFormatter();
+        MemoryStream ms = new MemoryStream();
+        bf.Serialize(ms, userData);
+
+        string result = Convert.ToBase64String(ms.GetBuffer());
+        Debug.Log("MN_NET :: SaveStorageData :: original actionKey " + MN_Data.Instance.userMe.UserActionKey);
+
+        if (MN_Data.Instance.userMe.UserActionKey.Equals(string.Empty))
+        {
+            Debug.Log("MN_NET _ save action empty ");
+            plugin.Storage.SavePlus(uuid, result, true, (state, errorCode, jsonString, values) =>
+                        {
+                            Debug.Log("no actionKey");
+                            Debug.Log("savePlus # state " + state);
+                            Debug.Log("savePlus # message " + errorCode);
+                            Debug.Log("savePlus # json " + jsonString);
+
+                            if (state.Equals(Configure.PN_API_STATE_SUCCESS))
+                            {
+                                Debug.Log("AAAAAAAAAAAAAAA ");
+                                ObscuredString actionKey = values["ActionKey"].ToString();
+                                MN_Data.Instance.userMe.SetUserActionKey(actionKey);
+                                MN_Data.Instance.SaveLocalData();
+                                Debug.Log(":: 저장데이터 확인 " + MN_Data.Instance.userMe.UserActionKey);
+                                ReturnNetResult(true);
+
+                            }
+                            else
+                            {
+                                Debug.Log("BBBBBBBBBBB ");
+                                ReturnNetResult(false);
+                            }
+                        });
+        }
+        else
+        {
+            Debug.Log("MN_NET _ save action valid  " + MN_Data.Instance.userMe.UserActionKey);
+            plugin.Storage.SavePlus(uuid, result, MN_Data.Instance.userMe.UserActionKey, true, (state, errorCode, jsonString, values) =>
+               {
+                   Debug.Log("savePlus # state " + state);
+                   Debug.Log("savePlus # message " + errorCode);
+                   Debug.Log("savePlus # json " + jsonString);
+
+                   if (state.Equals(Configure.PN_API_STATE_SUCCESS))
+                   {
+                       Debug.Log("CCCCCCCCCCCCCc ");
+
+                       ObscuredString actionKey = values["ActionKey"].ToString();
+                       MN_Data.Instance.userMe.SetUserActionKey(actionKey);
+                       Debug.Log(":: 저장데이터 확인 " + MN_Data.Instance.userMe.UserActionKey);
+                       MN_Data.Instance.SaveLocalData();
+
+                       ReturnNetResult(true);
+                   }
+                   else
+                   {
+                       Debug.Log("DDDDDDDDDDDDDDDDDDDD");
+                       ReturnNetResult(false);
+                   }
+               });
+        }
+    }
+
+    void LoadCloudData()
+    {
+        plugin = Plugin.GetInstance();
+
+        //   MN_Net.Instance.StartNetwork();
+        ObscuredString uuid = ObscuredPrefs.GetString(MN_Game.Instance.GetUserAuthKey());
+        Debug.Log("# 로드 전, 현재 액션 키 " + MN_Data.Instance.userMe.UserActionKey.ToString());
+        plugin.Storage.LoadPlus(uuid, (state, message, rawData, dictionary) =>
+       {
+           MN_Net.Instance.EndNetwork(); //load만 특수 - (덮어씌울지 물어보는 단계가 저장과 달리 있기 때문에.)
+
+           Debug.Log("# LaodPlus state " + state);
+           Debug.Log("# LaodPlus error " + message);
+           Debug.Log("# LaodPlus rawData " + rawData);
+
+           if (state.Equals(Configure.PN_API_STATE_SUCCESS))
+           {
+               ObscuredString value = dictionary["StorageValue"].ToString();
+
+               var binaryFormatter = new BinaryFormatter();
+               var memoryStream = new MemoryStream(Convert.FromBase64String(value));
+               UserData userData = (UserData)binaryFormatter.Deserialize(memoryStream);
+
+               if (SettingLayer.Instance)
+                   SettingLayer.Instance.OpenDataPanel(userData);
+               /* 이전
+
+                              AlertLayer.ShowTwoButton(Util.GetLocalText("ui_text_alarm"), Util.GetLocalText("ui_notice_load_overwrite"), Util.GetLocalText("ui_text_cancle"), Util.GetLocalText("ui_text_check"), (btnIdx) =>
+                                                {
+                                                    if (btnIdx == 1)
+                                                    {
+                                                        var binaryFormatter = new BinaryFormatter();
+                                                        var memoryStream = new MemoryStream(Convert.FromBase64String(value));
+                                                        UserData userData = (UserData)binaryFormatter.Deserialize(memoryStream);
+
+
+                                                         MN_Data.Instance.userMe.SetLocalData(userData, false);
+
+                                                        MN_Data.Instance.SaveLocalData();
+                                                           Debug.Log("데이터 덮어쓰기 후, 액션 키 확인 " + MN_Data.Instance.userMe.UserActionKey);
+                                                         AlertLayer.ShowOneButton(MN_Data.GetLocalText("notice"), MN_Data.GetLocalText("ui_notice_load_server"), MN_Data.GetLocalText("check"), null, false);
+
+                                                         ReturnNetResult(true);
+                                                    }
+                                                    else //취소버튼
+                                                    {
+                                                          ReturnNetResult(false);
+                                                    }
+                                                });
+               */
+           }
+           else
+           {
+               if (SettingLayer.Instance)
+               {
+                   Debug.Log(">> 저장된 데이터가 없음 ");
+                   SettingLayer.Instance.OpenDataPanel(null);
+               }
+               /* 기존
+                              ReturnNetResult(false); //만약 로드를 명령한 루틴 후에 실패 명령어가 alert 외에 또있다면 문제가 될 순서와 구조.
+                              MN_Layer.Instance.Pop(); // 윗줄 (for 로드 넷 루틴 클리어) 처리로 인해, 데이터 불러오기 취소된 것에 따른 , 알림창이 떴을 거니까.
+
+                              AlertLayer.ShowOneButton(MN_Data.GetLocalText("notice"), MN_Data.GetLocalText("ui_notice_nodata_load"), MN_Data.GetLocalText("check"), null, false); // 로드할 데이터가 없습니다.
+
+               Debug.Log("MN_NET >> LoadStorageData >> Fail>> " + message);*/
+           }
+       });
+    }
+
+    public void LoadExisingUserData(Action clearCallBack) //넷 익스큐트에 없는, 로그인 후에 부르는.
+    {
+        plugin = Plugin.GetInstance();
+
+        ObscuredString uuid = ObscuredPrefs.GetString(MN_Game.Instance.GetUserAuthKey());
+
+        plugin.Storage.LoadPlus(uuid, (state, message, rawData, dictionary) =>
+       {
+           if (state.Equals("success") || state.Equals(Configure.PN_API_STATE_SUCCESS))
+           {
+               ObscuredString value = dictionary["StorageValue"].ToString();
+               ObscuredString actionKey = dictionary["ActionKey"].ToString();
+
+               var binaryFormatter = new BinaryFormatter();
+               var memoryStream = new MemoryStream(Convert.FromBase64String(value));
+               UserData userData = (UserData)binaryFormatter.Deserialize(memoryStream);
+               userData.actionKey = actionKey;
+
+               MN_Data.Instance.userMe.SetLocalData(userData, true, false);//액션키 저장 허용
+               MN_Data.Instance.SaveLocalData();
+
+               Debug.Log("MN_NET >> 확인 : " + MN_Data.Instance.userMe.UserActionKey);
+               clearCallBack.Invoke();
+           }
+           else
+           {
+               Debug.Log("MN_NET >> LoadActionKey >> Fail>> " + message);
+               clearCallBack.Invoke();
+           }
+       });
+    }
+
+    void TestValidateToken()
+    {
+        ObscuredBool result = false;
+
+        plugin = Plugin.GetInstance();
+
+        plugin.AccountTokenStatus(MN_Data.Instance.userMe.UserToken, (status, errorCode, jsonString, values) =>
+         {
+             if (status.Equals(Configure.PN_API_STATE_SUCCESS))
+             {
+                 ReturnNetResult(true);
+             }
+             else
+             {
+                 ReturnNetResult(false);
+             }
+         });
+    }
+
+
+
+    void TestCheckInternet()
+    {
+        if (Application.internetReachability == NetworkReachability.NotReachable)
+            ReturnNetResult(false);
+        else
+            ReturnNetResult(true);
+    }
+
+    public ObscuredBool CheckInternet()
+    {
+        bool connect = true;
+        if (Application.internetReachability == NetworkReachability.NotReachable)
+            connect = false;
+        return connect;
+    }
+
+
+    void Purchase()
+    {
+        MN_IAP.Instance.BuyProduct();
+    }
+
+    #region netSuquence
+    public void InitNetRoutine(NetActionKey firstActionKey)  //1
+    {
+        netExcuteDict = new Dictionary<NetActionKey, NetActionKey[]>();
+        // clearFunc = ReturnClearResult;
+        this.preNetActionKey = NetActionKey.none;
+        this.curNetActionKey = NetActionKey.none;
+        this.firstActionKey = firstActionKey;
+    }
+    public void AddNetRoutine(NetActionKey dictKey, NetActionKey clearKey, NetActionKey failKey)
+    {
+        NetActionKey[] returnKeys = new NetActionKey[2];
+        returnKeys[0] = clearKey; //첫번째 인자 Pass
+        returnKeys[1] = failKey;
+        netExcuteDict.Add(dictKey, returnKeys);
+    }
+
+    public void ReturnNetResult(ObscuredBool result) // 이미 처리된 콜백이 더블 백 되는 것에 대해 처리가 필요할 듯
+    {
+        preNetActionKey = curNetActionKey;
+        Debug.Log("ReturnNetResult :: ended 현재 액션키..." + curNetActionKey);
+        if (netExcuteDict.ContainsKey(curNetActionKey))
+        {
+            if (result)
+                curNetActionKey = netExcuteDict[curNetActionKey][0];
+            else
+                curNetActionKey = netExcuteDict[curNetActionKey][1];
+        }
+        else
+        {
+            Debug.Log("MN_NET :: ReturnNetResult : + netExcuteDict에 key존재 X" + curNetActionKey);
+            curNetActionKey = NetActionKey.none;
+        }
+        Debug.Log("ReturnNetResult :: updated 현재 액션키..." + curNetActionKey);
+
+        MN_Net.Instance.EndNetwork();
+        //////////// -> saveLocalData  test
+        if (curNetActionKey != NetActionKey.none)
+            this.ExcuteAction();
+    }
+
+    public void ExcuteAction()
+    {
+        if (curNetActionKey == NetActionKey.none)
+        {
+            Debug.Log("ExcuteAction :: curNetActionKey = firstActionKey");
+            curNetActionKey = firstActionKey;
+        }
+
+        Debug.Log("ExcuteAction :: 현재 액션키..." + curNetActionKey);
+
+        if (curNetActionKey != preNetActionKey)
+        {
+            if (netFuncDict.ContainsKey(curNetActionKey))
+            {
+                netFuncDict[curNetActionKey].Invoke();
+            }
+            switch (curNetActionKey)
+            {
+                case NetActionKey.purchase:
+                case NetActionKey.save:
+                case NetActionKey.load:
+                    MN_Net.Instance.StartNetwork();
+                    break;
+            }
+        }
+    }
+    #endregion netSuquence
+
+    public void ResisterGoogleToken(ObscuredString token, Action<ObscuredString, ObscuredString> clearCallBack, Action LoginFailCallBack)
+    {
+        plugin = Plugin.GetInstance();
+
+        this.StartNetwork();
+
+        plugin.AccountSocialSignIn(token, Configure.PN_ACCOUNT_GOOGLE, (status, errorCode, jsonString, values) =>
+             {
+                 this.EndNetwork();
+
+                 if (status == Configure.PN_API_STATE_SUCCESS)
+                 {
+                     Debug.Log(">> 플레이나누인증 Clear + Google");
+                     clearCallBack?.Invoke(values["access_token"].ToString(), values["uuid"].ToString());
+
+                     Debug.Log(values["access_token"].ToString());
+                     Debug.Log(values["refresh_token"].ToString());
+                     Debug.Log(values["uuid"].ToString());
+                     Debug.Log(values["openID"].ToString());
+                     Debug.Log(values["nickname"].ToString());
+                     Debug.Log(values["linkedID"].ToString());
+                     Debug.Log(values["linkedType"].ToString());
+                     Debug.Log(values["country"].ToString());
+                 }
+                 else
+                 {
+                     Debug.Log("MN_NET > ResisterGoogleToken > Fail");
+                     LoginFailCallBack?.Invoke();
+                 }
+             });
+    }
+
+    public void ResisterFaceBookToken(string token, Action<ObscuredString, ObscuredString> callBack)
+    {
+        plugin.AccountSocialSignIn(token, Configure.PN_ACCOUNT_FACEBOOK, (status, errorCode, jsonString, values) =>
+                  {
+                      if (status.Equals(Configure.PN_API_STATE_SUCCESS))
+                      {
+                          Debug.Log(">> 플레이나누인증 Clear + faceBook");
+                          callBack?.Invoke(values["access_token"].ToString(), values["uuid"].ToString());
+
+                          Debug.Log(values["access_token"].ToString());
+                          Debug.Log(values["refresh_token"].ToString());
+                          Debug.Log(values["uuid"].ToString());
+                          Debug.Log(values["openID"].ToString());
+                          Debug.Log(values["nickname"].ToString());
+                          Debug.Log(values["linkedID"].ToString());
+                          Debug.Log(values["linkedType"].ToString());
+                          Debug.Log(values["country"].ToString());
+                      }
+                      else
+                      {
+                          Debug.Log("페이스북 인증 실패");
+                      }
+                  });
+    }
+
+
+    public void AskLogin()
+    {
+        string askString = string.Format("{0}\n{1}", Util.GetLocalText("ui_notice_need_login"), Util.GetLocalText("ui_notice_ask_login"));
+
+        AlertLayer.ShowTwoButton(Util.GetLocalText("ui_text_alarm"), askString, Util.GetLocalText("ui_text_cancle"), Util.GetLocalText("ui_text_check"), (btnIdx) =>
+         {
+             if (btnIdx == 1) //확인버튼
+             {
+                 ReturnNetResult(true);
+             }
+             else //취소버튼
+             {
+                 ReturnNetResult(false);
+             }
+         });
+    }
+
+
+    public void OpenLogin()
+    {
+        LoginLayer loginLayer =
+          MN_Layer.Instance.PushLayer(UIName.LoginLayer, true).GetComponent<LoginLayer>();
+
+        loginLayer.HideGuest();
+        loginLayer.AddEventToBackButton(delegate { this.ReturnNetResult(false); });
+
+        loginLayer.SetCallBack(delegate { this.ReturnNetResult(true); }, delegate { this.ReturnNetResult(false); });
+    }
+
+    public void CompletePurchse()
+    {
+        if (MarketLayer.Instance)
+            MarketLayer.Instance.OpenCompletePurchase();
+    }
+}
