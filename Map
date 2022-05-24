@@ -1,0 +1,52 @@
+using System.Collections.Generic;
+using System.Linq;
+using Newtonsoft.Json;
+
+namespace Map
+{
+    public class Map
+    {
+        public List<Node> nodes;
+        public List<MapNodePoint> path;
+        public string bossNodeName;
+        public string configName; // similar to the act name in Slay the Spire
+
+        public float width = 0;
+
+        public Map(string configName, string bossNodeName, float width, List<Node> nodes, List<MapNodePoint> path)
+        {
+            this.configName = configName;
+            this.bossNodeName = bossNodeName;
+            this.width = width;
+            this.nodes = nodes;
+            this.path = path;
+        }
+
+        public Node GetBossNode()
+        {
+            return nodes.FirstOrDefault(n => n.nodeType == NodeType.Boss);
+        }
+
+        public float DistanceBetweenFirstAndLastLayers()
+        {
+            var bossNode = GetBossNode();
+            var firstLayerNode = nodes.FirstOrDefault(n => n.point.y == 0);
+
+            if (bossNode == null || firstLayerNode == null)
+                return 0f;
+
+            return bossNode.position.y - firstLayerNode.position.y;
+        }
+
+        public Node GetNode(MapNodePoint point)
+        {
+            return nodes.FirstOrDefault(n => n.point.Equals(point));
+            //시퀀스의 첫 번째 요소를 반환하거나, 요소가 없으면 기본값을 반환
+        }
+
+        public string ToJson()
+        {
+            return JsonConvert.SerializeObject(this, Formatting.Indented);
+        }
+    }
+}
