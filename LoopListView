@@ -1,0 +1,174 @@
+  public void DetectShownItem(int prefabNo) //ej custom
+        {
+            float scrollRectHeight = mScrollRect.GetComponent<RectTransform>().rect.height;
+
+            float itemHeight = 0;
+
+            for (int i = 0; i < mItemList.Count; i++)
+            {
+                if (mItemList[i].CachedRectTransform.rect.height >= itemHeight)
+                    itemHeight = mItemList[i].CachedRectTransform.rect.height;
+            }
+
+            float devide = mContainerTrans.anchoredPosition3D.y / itemHeight;
+            float max = itemHeight * prefabNo;
+            Vector3 pos = Vector3.zero;
+            bool shown = false;
+            float ratio = scrollRectHeight / itemHeight - 1;
+
+            if (mContainerTrans.anchoredPosition3D.y > max)
+            {
+                MovePanelToItemIndex(prefabNo, 0);
+                RecycleAllItem();
+                return;
+            }
+            else if (devide < prefabNo - ratio)
+            {
+                float containerPos = mContainerTrans.anchoredPosition3D.y;
+                if (containerPos < 0)
+                {
+                    containerPos = 0;
+                }
+                pos.y = -containerPos - (itemHeight * ratio);
+            }
+            else
+            {
+                RecycleAllItem();
+                shown = true;
+            }
+
+            if (shown) return;
+
+            RecycleAllItem();
+
+            LoopListViewItem2 newItem = GetNewItemByIndex(prefabNo);
+            pos.x = newItem.StartPosOffset;
+
+            newItem.CachedRectTransform.anchoredPosition3D = pos;
+
+            if (mSupportScrollBar)
+            {
+                if (mIsVertList)
+                {
+                    SetItemSize(prefabNo, newItem.CachedRectTransform.rect.height, newItem.Padding);
+                }
+                else
+                {
+                    SetItemSize(prefabNo, newItem.CachedRectTransform.rect.width, newItem.Padding);
+                }
+            }
+            mItemList.Add(newItem);
+            UpdateContentSize();
+            float viewPortSize = ViewPortSize;
+            UpdateListView(viewPortSize + 100, viewPortSize + 100, viewPortSize, viewPortSize);
+            AdjustPanelPos();
+            ClearAllTmpRecycledItem();
+            ForceSnapUpdateCheck();
+            UpdateSnapMove(false, true);
+        }
+
+        public void MovePanelToItemIndex(int itemIndex, float offset)
+        {
+            mScrollRect.StopMovement(); //UI 내장 추상함수
+
+            mCurSnapData.Clear();
+
+            if (mItemTotalCount == 0)
+            {
+                return;
+            }
+            if (itemIndex < 0 && mItemTotalCount > 0)
+            {
+                return;
+            }
+            if (mItemTotalCount > 0 && itemIndex >= mItemTotalCount)
+            {
+                itemIndex = mItemTotalCount - 1;
+            }
+            if (offset < 0)
+            {
+                offset = 0;
+            }
+            Vector3 pos = Vector3.zero;
+            float viewPortSize = ViewPortSize;
+
+            if (offset > viewPortSize)
+            {
+                offset = viewPortSize;
+            }
+            // mContainerTrans => content
+            if (mArrangeType == ListItemArrangeType.TopToBottom) // mine
+            {
+                float containerPos = mContainerTrans.anchoredPosition3D.y;
+                if (containerPos < 0) // 0이하로 내려가는 일이 없음 -> 0부터 시작
+                {
+                    containerPos = 0;
+                }
+                pos.y = -containerPos - offset;
+            }
+            else if (mArrangeType == ListItemArrangeType.BottomToTop)
+            {
+                float containerPos = mContainerTrans.anchoredPosition3D.y;
+                if (containerPos > 0)
+                {
+                    containerPos = 0;
+                }
+                pos.y = -containerPos + offset;
+            }
+            else if (mArrangeType == ListItemArrangeType.LeftToRight)
+            {
+                float containerPos = mContainerTrans.anchoredPosition3D.x;
+                if (containerPos > 0)
+                {
+                    containerPos = 0;
+                }
+                pos.x = -containerPos + offset;
+            }
+            else if (mArrangeType == ListItemArrangeType.RightToLeft)
+            {
+                float containerPos = mContainerTrans.anchoredPosition3D.x;
+                if (containerPos < 0)
+                {
+                    containerPos = 0;
+                }
+                pos.x = -containerPos - offset;
+            }
+
+            RecycleAllItem();// 미파악
+            LoopListViewItem2 newItem = GetNewItemByIndex(itemIndex);
+            if (newItem == null)
+            {
+                ClearAllTmpRecycledItem();
+                return;
+            }
+            if (mIsVertList) // mine is true
+            {
+                pos.x = newItem.StartPosOffset;
+
+            }
+            else
+            {
+                pos.y = newItem.StartPosOffset;
+            }
+
+            newItem.CachedRectTransform.anchoredPosition3D = pos;
+
+            if (mSupportScrollBar)
+            {
+                if (mIsVertList)
+                {
+                    SetItemSize(itemIndex, newItem.CachedRectTransform.rect.height, newItem.Padding);
+                }
+                else
+                {
+                    SetItemSize(itemIndex, newItem.CachedRectTransform.rect.width, newItem.Padding);
+                }
+            }
+            mItemList.Add(newItem);
+            UpdateContentSize();
+            UpdateListView(viewPortSize + 100, viewPortSize + 100, viewPortSize, viewPortSize);
+            AdjustPanelPos();
+            ClearAllTmpRecycledItem();
+            ForceSnapUpdateCheck();
+            UpdateSnapMove(false, true);
+        }
